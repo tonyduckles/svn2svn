@@ -439,6 +439,7 @@ def pull_svn_rev(log_entry, svn_url, target_url, svn_path, original_wc, keep_aut
             run_svn(["up", m])
             m_url = svn_url + "/" + m
             out = run_svn(["merge", "-c", str(svn_rev), "--non-recursive",
+                     "--non-interactive", "--accept=theirs-full",
                      m_url+"@"+str(svn_rev), m])
             # if conflicts, use the copy from original_wc
             if out and out.split()[0] == 'C':
