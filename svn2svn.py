@@ -267,13 +267,16 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False):
     xml_string = run_svn(svn_log_args + args)
     return parse_svn_log_xml(xml_string)
 
-def get_svn_status(svn_wc):
+def get_svn_status(svn_wc, flags=None):
     """
     Get SVN status information about the given working copy.
     """
     # Ensure proper stripping by canonicalizing the path
     svn_wc = os.path.abspath(svn_wc)
-    args = [svn_wc]
+    args = []
+    if flags:
+        args += [flags]
+    args += [svn_wc]
     xml_string = run_svn(svn_status_args + args)
     return parse_svn_status_xml(xml_string, svn_wc)
 
@@ -359,10 +362,17 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False):
         options += list(files)
     run_svn(options)
 
+def in_svn(p):
+    entries = get_svn_status(p)
+    if not entries:
+      return False
+    d = entries[0]
+    return (d['type'] == 'normal')
+
 def svn_add_dir(p):
     # set p = "." when p = ""
     #p = p.strip() or "."
-    if p.strip() and not os.path.exists(p + os.sep + ".svn"):
+    if p.strip() and not in_svn(p):
         svn_add_dir(os.path.dirname(p))
         if not os.path.exists(p):
             os.makedirs(p)
@@ -406,7 +416,7 @@ def pull_svn_rev(log_entry, svn_url, target_url, svn_path, original_wc, keep_aut
             # Both paths can be identical if copied from an old rev.
             # We treat like it a normal change.
             if old_p != p:
-                if not os.path.exists(p + os.sep + '.svn'):
+                if not in_svn(p):
                     svn_add_dir(os.path.dirname(p))
                     run_svn(["up", old_p])
                     run_svn(["copy", old_p, p])
