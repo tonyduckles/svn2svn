@@ -57,14 +57,11 @@ svn_log_args = ['log', '--xml', '-v']
 svn_info_args = ['info', '--xml']
 svn_checkout_args = ['checkout', '-q']
 svn_status_args = ['status', '--xml', '-v', '--ignore-externals']
+debug = True
+runsvn_verbose = True
 
 # define exception class
 class ExternalCommandFailed(RuntimeError):
-    """
-    An external command failed.
-    """
-
-class ParameterError(RuntimeError):
     """
     An external command failed.
     """
@@ -133,7 +130,8 @@ def run_svn(args, fail_if_stderr=False, encoding="utf-8"):
 
     cmd = find_program("svn")
     cmd_string = str(" ".join(map(shell_quote, [cmd] + t_args)))
-    print "*", cmd_string
+    if runsvn_verbose:
+        print "$", cmd_string
     pipe = Popen([cmd] + t_args, executable=cmd, stdout=PIPE, stderr=PIPE)
     out, err = pipe.communicate()
     if pipe.returncode != 0 or (fail_if_stderr and err.strip()):
@@ -361,8 +359,16 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False):
     if files:
         options += list(files)
     run_svn(options)
+    print ""
 
 def in_svn(p):
+    """
+    Check if a given file/folder is under Subversion control.
+    Prior to SVN 1.6, we could "cheat" and look for the existence of ".svn" directories.
+    With SVN 1.7 and beyond, WC-NG means only a single top-level ".svn" at the root of the working-copy.
+    Use "svn status" to check the status of the file/folder.
+    TODO: Is there a better way to do this?
+    """
     entries = get_svn_status(p)
     if not entries:
       return False
@@ -373,82 +379,218 @@ def svn_add_dir(p):
     # set p = "." when p = ""
     #p = p.strip() or "."
     if p.strip() and not in_svn(p):
+        # Make sure our parent is under source-control before we try to "svn add" this folder.
         svn_add_dir(os.path.dirname(p))
         if not os.path.exists(p):
             os.makedirs(p)
         run_svn(["add", p])
 
-def pull_svn_rev(log_entry, svn_url, target_url, svn_path, original_wc, keep_author=False):
+def find_svn_parent(source_repos_url, source_path, branch_path, branch_rev):
+    """
+    Given a copy-from path (branch_path), walk the SVN history backwards to inspect
+    the ancestory of that path. If we find a "copyfrom_path" which source_path is a
+    substring match of, then return that source path. Otherwise, branch_path has no
+    ancestory compared to source_path. This is useful when comparing "trunk" vs. "branch"
+    paths, to handle cases where a file/folder was renamed in a branch and then that
+    branch was merged back to trunk.
+    * source_repos_url = Full URL to root of repository, e.g. 'file:///path/to/repos'
+    * source_path = e.g. 'trunk/projectA/file1.txt'
+    * branch_path = e.g. 'branch/bug123/projectA/file1.txt'
+    """
+
+    done = False
+    ancestor = { 'path': branch_path, 'revision': branch_rev }
+    ancestors = []
+    ancestors.append({'path': ancestor['path'], 'revision': ancestor['revision']})
+    rev = branch_rev
+    path = branch_path
+    while not done:
+        # Get "svn log" entry for path just before (or at) @rev
+        if debug:
+            print ">> find_svn_parent: " + source_repos_url + " " + path + "@" + str(rev)
+        log_entry = get_last_svn_log_entry(source_repos_url + path + "@" + str(rev), 1, str(rev))
+        if not log_entry:
+            done = True
+        # Update rev so that we go back in time during the next loop
+        rev = log_entry['revision']-1
+        # Check if our target path was changed in this revision
+        for d in log_entry['changed_paths']:
+            p = d['path']
+            if not p in path:
+                continue
+
+            # Check action-type for this file
+            action = d['action']
+            if action not in 'MARD':
+                display_error("In SVN rev. %d: action '%s' not supported. \
+                               Please report a bug!" % (svn_rev, action))
+            if debug:
+                debug_desc = ": " + action + " " + p
+                if d['copyfrom_path']:
+                    debug_desc += " (from " + d['copyfrom_path'] + "@" + str(d['copyfrom_revision']) + ")"
+                print debug_desc
+
+            if action == 'R':
+                # If file was replaced, it has no ancestor
+                return None
+            if action == 'D':
+                # If file was deleted, it has no ancestor
+                return None
+            if action == 'A':
+                # If file was added but not a copy, it has no ancestor
+                if not d['copyfrom_path']:
+                    return None
+                p_old = d['copyfrom_path']
+                ancestor['path'] = ancestor['path'].replace(p, p_old)
+                ancestor['revision'] = d['copyfrom_revision']
+                ancestors.append({'path': ancestor['path'], 'revision': ancestor['revision']})
+                # If we found a copy-from case which matches our source_path, we're done
+                if (p_old == source_path) or (p_old.startswith(source_path + "/")):
+                    return ancestors
+                # Else, follow the copy and keep on searching
+                rev = ancestor['revision']
+                path = ancestor['path']
+                if debug:
+                    print ">> find_svn_parent: copy-from: " + path + "@" + str(rev) + " -- " + ancestor['path']
+                break
+    return None
+
+def do_svn_copy(source_repos_url, source_path, dest_path, ancestors):
+    for ancestor in ancestors:
+        break
+        # TODO
+
+def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, source_path, original_wc, keep_author=False):
     """
     Pull SVN changes from the given log entry.
-    Returns the new SVN revision. 
+    Returns the new SVN revision.
     If an exception occurs, it will rollback to revision 'svn_rev - 1'.
     """
     svn_rev = log_entry['revision']
     run_svn(["up", "--ignore-externals", "-r", svn_rev, original_wc])
 
     removed_paths = []
-    merged_paths = []
+    modified_paths = []
     unrelated_paths = []
     commit_paths = []
     for d in log_entry['changed_paths']:
+        # Get the full path for this changed_path
         # e.g. u'/branches/xmpp/twisted/words/test/test.py'
         p = d['path']
-        if not p.startswith(svn_path + "/"):
+        if not p.startswith(source_path + "/"):
             # Ignore changed files that are not part of this subdir
-            if p != svn_path:
+            if p != source_path:
                 unrelated_paths.append(p)
             continue
+        # Calculate the relative path (based on source_path) for this changed_path
         # e.g. u'twisted/words/test/test.py'
-        p = p[len(svn_path):].strip("/")
+        p = p[len(source_path):].strip("/")
         # Record for commit
         action = d['action']
+
+        if debug:
+            debug_desc = " " + action + " " + source_path + "/" + p
+            if d['copyfrom_path']:
+                debug_desc += " (from " + d['copyfrom_path'] + "@" + str(d['copyfrom_revision']) + ")"
+            print debug_desc
+
         if action not in 'MARD':
             display_error("In SVN rev. %d: action '%s' not supported. \
                            Please report a bug!" % (svn_rev, action))
-        
+
+        # Try to be efficient and keep track of an explicit list of paths in the
+        # working copy that changed. If we commit from the root of the working copy,
+        # then SVN needs to crawl the entire working copy looking for pending changes.
+        # But, if we gather too many paths to commit, then we wipe commit_paths below
+        # and end-up doing a commit at the root of the working-copy.
         if len (commit_paths) < 100:
             commit_paths.append(p)
-        # Detect special cases
-        old_p = d['copyfrom_path']
-        if old_p and old_p.startswith(svn_path + "/"):
-            old_p = old_p[len(svn_path):].strip("/")
-            # Both paths can be identical if copied from an old rev.
-            # We treat like it a normal change.
-            if old_p != p:
-                if not in_svn(p):
-                    svn_add_dir(os.path.dirname(p))
-                    run_svn(["up", old_p])
-                    run_svn(["copy", old_p, p])
-                    if os.path.isfile(p):
-                        shutil.copy(original_wc + os.sep + p, p)
-                if action == 'R':
-                    removed_paths.append(old_p)
-                    if len (commit_paths) < 100:
-                        commit_paths.append(old_p)
-                continue
+
+        # Special-handling for replace's
+        if action == 'R':
+            # If file was "replaced" (deleted then re-added, all in same revision),
+            # then we need to run the "svn rm" first, then change action='A'. This
+            # lets the normal code below handle re-"svn add"'ing the files. This
+            # should replicate the "replace".
+            run_svn(["up", p])
+            run_svn(["remove", "--force", p])
+            action = 'A'
+
+        # Handle all the various action-types
+        # (Handle "add" first, for "svn copy/move" support)
         if action == 'A':
-            if os.path.isdir(original_wc + os.sep + p):
-                svn_add_dir(p)
+            # Determine where to export from
+            from_rev = svn_rev
+            from_path = source_path + "/" + p
+            svn_copy = False
+            # Handle cases where this "add" was a copy from another URL in the source repos
+            if d['copyfrom_revision']:
+                from_rev = d['copyfrom_revision']
+                from_path = d['copyfrom_path']
+                ancestors = find_svn_parent(source_repos_url, source_path, from_path, from_rev)
+                if ancestors:
+                    parent = ancestors[len(ancestors)-1]
+                    #from_rev =  parent['revision']
+                    #from_path = parent['path']
+                    if debug:
+                        print ">> find_svn_parent: FOUND PARENT: " + parent['path'] + "@" + str(parent['revision'])
+                        print ancestors
+                    # TODO: For copy-from's, need to re-walk the branch history to make sure we handle
+                    # any renames correctly.
+                    #from_path = from_path[len(source_path):].strip("/")
+                    #svn_copy = True
+
+            if svn_copy:
+                #do_svn_copy(source_repos_url, source_path
+                run_svn(["copy", from_path, p])
             else:
-                p_path = os.path.dirname(p).strip() or '.'
-                svn_add_dir(p_path)
-                shutil.copy(original_wc + os.sep + p, p)
-                run_svn(["add", p])
+                # Create (parent) directory if needed
+                if os.path.isdir(original_wc + os.sep + p):
+                    p_path = p
+                else:
+                    p_path = os.path.dirname(p).strip() or '.'
+                if not os.path.exists(p_path):
+                    os.makedirs(p_path)
+
+                # Export the entire added tree. Can't use shutil.copytree() since that
+                # would copy ".svn" folders on SVN pre-1.7. Also, in cases where the copy-from
+                # is from some path in the source_repos _outside_ of our source_path, original_wc
+                # won't even have the source files we want to copy.
+                run_svn(["export", "--force", "-r", str(from_rev),
+                         source_repos_url + from_path + "@" + str(from_rev), p])
+                # TODO: Need to copy SVN properties from source repos
+
+                if os.path.isdir(original_wc + os.sep + p):
+                    svn_add_dir(p)
+                else:
+                    p_path = os.path.dirname(p).strip() or '.'
+                    svn_add_dir(p_path)
+                    run_svn(["add", p])
+
         elif action == 'D':
+            # Queue "svn remove" commands, to allow the action == 'A' handling the opportunity
+            # to do smart "svn copy" handling on copy/move/renames.
             removed_paths.append(p)
-        else: # action == 'M'
-            merged_paths.append(p)
+
+        elif action == 'R':
+            # TODO
+            display_error("Internal Error: Handling for action='R' not implemented yet.")
+
+        elif action == 'M':
+            modified_paths.append(p)
+
+        else:
+            display_error("Internal Error: pull_svn_rev: Unhandled 'action' value: '" + action + "'")
 
     if removed_paths:
         for r in removed_paths:
             run_svn(["up", r])
             run_svn(["remove", "--force", r])
 
-    if merged_paths:
-        for m in merged_paths:
+    if modified_paths:
+        for m in modified_paths:
             run_svn(["up", m])
-            m_url = svn_url + "/" + m
+            m_url = source_url + "/" + m
             out = run_svn(["merge", "-c", str(svn_rev), "--non-recursive",
                      "--non-interactive", "--accept=theirs-full",
                      m_url+"@"+str(svn_rev), m])
@@ -464,7 +606,8 @@ def pull_svn_rev(log_entry, svn_url, target_url, svn_path, original_wc, keep_aut
         print "Unrelated paths: "
         print "*", unrelated_paths
 
-    ## too many files
+    # If we had too many individual paths to commit, wipe the list and just commit at
+    # the root of the working copy.
     if len (commit_paths) > 99:
         commit_paths = []
 
@@ -477,7 +620,7 @@ def pull_svn_rev(log_entry, svn_url, target_url, svn_path, original_wc, keep_aut
         has_Conflict = False
         for d in log_entry['changed_paths']:
             p = d['path']
-            p = p[len(svn_path):].strip("/")
+            p = p[len(source_path):].strip("/")
             if os.path.isfile(p):
                 if os.path.isfile(p + ".prej"):
                     has_Conflict = True
@@ -601,15 +744,16 @@ def main():
 
     # Get SVN info
     svn_info = get_svn_info(original_wc)
+    # Get the base URL for the source repos
     # e.g. u'svn://svn.twistedmatrix.com/svn/Twisted'
-    repos_url = svn_info['repos_url']
+    source_repos_url = svn_info['repos_url']
+    # Get the source URL for the source repos
     # e.g. u'svn://svn.twistedmatrix.com/svn/Twisted/branches/xmpp'
-    svn_url = svn_info['url']
-    assert svn_url.startswith(repos_url)
+    source_url = svn_info['url']
+    assert source_url.startswith(source_repos_url)
+    # Get the relative offset of source_url based on source_repos_url
     # e.g. u'/branches/xmpp'
-    svn_path = svn_url[len(repos_url):]
-    # e.g. 'xmpp'
-    svn_branch = svn_url.split("/")[-1]
+    source_path = source_url[len(source_repos_url):]
 
     if options.cont_from_break:
         svn_rev = svn_info['revision'] - 1
@@ -617,11 +761,11 @@ def main():
             svn_rev = 1
 
     # Load SVN log starting from svn_rev + 1
-    it_log_entries = iter_svn_log_entries(svn_url, svn_rev + 1, greatest_rev)
+    it_log_entries = iter_svn_log_entries(source_url, svn_rev + 1, greatest_rev)
 
     try:
         for log_entry in it_log_entries:
-            pull_svn_rev(log_entry, svn_url, target_url, svn_path, 
+            pull_svn_rev(log_entry, source_repos_url, source_url, target_url, source_path,
                          original_wc, keep_author)
 
     except KeyboardInterrupt:
@@ -641,3 +785,4 @@ def main():
 if __name__ == "__main__":
     main()
 
+# vim: shiftwidth=4 softtabstop=4
