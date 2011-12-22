@@ -268,7 +268,7 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False):
     if rev_start != 'HEAD' and rev_end != 'HEAD':
         args += ['-r', '%s:%s' % (rev_start, rev_end)]
         if not "@" in svn_url_or_wc:
-            url += "@" + str(rev_end)
+            url += "@" + str(max(rev_start, rev_end))
     args += ['--limit', str(limit), url]
     xml_string = run_svn(svn_log_args + args)
     return parse_svn_log_xml(xml_string)
@@ -644,7 +644,8 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
                 # Export the entire added tree.
                 run_svn(["export", "--force", "-r", str(copyfrom_rev),
                          source_repos_url + copyfrom_path + "@" + str(copyfrom_rev), path_offset])
-                run_svn(["add", "--parents", path_offset])
+                if not in_svn(path_offset):
+                    run_svn(["add", "--parents", path_offset])
                 # TODO: Need to copy SVN properties from source repos
 
         elif action == 'D':
