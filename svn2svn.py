@@ -806,6 +806,9 @@ def main():
             svn_start_log = get_last_svn_log_entry(source_url, 1, options.svn_rev)
         else:
             # Otherwise, get log entry of branch creation
+            # TODO: This call is *very* expensive on a repo with lots of revisions.
+            #       Even though the call is passing --limit 1, it seems like that limit-filter
+            #       is happening after SVN has fetched the full log history.
             svn_start_log = get_first_svn_log_entry(source_url, 1, greatest_rev)
 
         # This is the revision we will start from for source_url
