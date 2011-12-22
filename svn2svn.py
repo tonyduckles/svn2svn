@@ -51,8 +51,9 @@ svn_status_args = ['status', '--xml', '-v', '--ignore-externals']
 debug = True
 debug_runsvn_timing = False    # Display how long each "svn" OS command took to run?
 # Setup verbosity options
-runsvn_verbose = True     # Echo every "svn" OS command we run?
-svnlog_verbose = True     # Echo each action + changed-path as we walk the history?
+runsvn_showcmd = True     # Display every "svn" OS command we run?
+runsvn_showout = False    # Display the stdout results from every  "svn" OS command we run?
+svnlog_verbose = True     # Display each action + changed-path as we walk the history?
 
 # define exception class
 class ExternalCommandFailed(RuntimeError):
@@ -124,8 +125,8 @@ def run_svn(args, fail_if_stderr=False, encoding="utf-8"):
 
     cmd = find_program("svn")
     cmd_string = str(" ".join(map(shell_quote, [cmd] + t_args)))
-    if runsvn_verbose:
-        print "$", cmd_string
+    if runsvn_showcmd:
+        print "$", "("+os.getcwd()+")", cmd_string
     if debug_runsvn_timing:
         time1 = time.time()
     pipe = Popen([cmd] + t_args, executable=cmd, stdout=PIPE, stderr=PIPE)
@@ -133,6 +134,8 @@ def run_svn(args, fail_if_stderr=False, encoding="utf-8"):
     if debug_runsvn_timing:
         time2 = time.time()
         print "(" + str(round(time2-time1,4)) + " elapsed)"
+    if out and runsvn_showout:
+        print out
     if pipe.returncode != 0 or (fail_if_stderr and err.strip()):
         display_error("External program failed (return code %d): %s\n%s"
             % (pipe.returncode, cmd_string, err))
@@ -240,8 +243,7 @@ def get_svn_info(svn_url_or_wc, rev_number=None):
         args = [svn_url_or_wc + "@" + str(rev_number)]
     else:
         args = [svn_url_or_wc]
-    xml_string = run_svn(svn_info_args + args,
-        fail_if_stderr=True)
+    xml_string = run_svn(svn_info_args + args, fail_if_stderr=True)
     return parse_svn_info_xml(xml_string)
 
 def svn_checkout(svn_url, checkout_dir, rev_number=None):
@@ -353,6 +355,7 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False):
     """
     Given an SVN log entry and an optional sequence of files, do an svn commit.
     """
+    # TODO: Run optional external shell hook here, for doing pre-commit filtering
     # This will use the local timezone for displaying commit times
     timestamp = int(entry['date'])
     svn_date = str(datetime.fromtimestamp(timestamp))
@@ -462,7 +465,7 @@ def find_svn_ancestors(source_repos_url, source_base, source_offset, copyfrom_pa
                 break
     return None
 
-def replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url, original_wc):
+def replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url):
     """
     Given an array of ancestor info (find_svn_ancestors), replay the history
     to correctly track renames ("svn copy/move") across branch-merges.
@@ -506,9 +509,9 @@ def replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url, or
         for log_entry in it_log_entries:
             #print ">> replay_svn_ancestors: log_entry: (" + source_repos_url+source_base + ")"
             #print log_entry
-            process_svn_log_entry(log_entry, source_repos_url, source_repos_url+source_base, target_url, original_wc)
+            process_svn_log_entry(log_entry, source_repos_url, source_repos_url+source_base, target_url)
 
-def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, original_wc, source_offset=""):
+def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, source_offset=""):
     """
     Process SVN changes from the given log entry.
     Returns array of all the paths in the working-copy that were changed,
@@ -621,16 +624,15 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, o
             if svn_copy:
                 if debug:
                     print ">> process_svn_log_entry: svn_copy: copy-from: " + copyfrom_path+"@"+str(copyfrom_rev) + "  source_base: "+source_base + "  len(ancestors): " + str(len(ancestors))
-                ## If the copyfrom_path is inside the current working-copy, then do a straight-up "svn copy".
-                #if source_base in copyfrom_path:
-                    # ...but not if the target is already tracked, because this might run several times for the same path.
+                # If we don't have any ancestors, then this is just a straight "svn copy" in the current working-copy.
                 if not ancestors:
+                    # ...but not if the target is already tracked, because this might run several times for the same path.
                     # TODO: Is there a better way to avoid recusion bugs? Maybe a collection of processed paths?
                     if not in_svn(path_offset):
                         run_svn(["copy", copyfrom_path, path_offset])
                 else:
                     # Replay any actions which happened to this folder from the ancestor path(s).
-                    replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url, original_wc)
+                    replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url)
             else:
                 # Create (parent) directory if needed
                 if d['kind'] == 'dir':
@@ -639,10 +641,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, o
                     p_path = os.path.dirname(path_offset).strip() or '.'
                 if not os.path.exists(p_path):
                     os.makedirs(p_path)
-                # Export the entire added tree. Can't use shutil.copytree() from original_wc
-                # since that would copy ".svn" folders on SVN pre-1.7. Also, in cases where the
-                # copy-from is from some path in the source_repos _outside_ of our source_base,
-                # original_wc won't even have the source files we want to copy.
+                # Export the entire added tree.
                 run_svn(["export", "--force", "-r", str(copyfrom_rev),
                          source_repos_url + copyfrom_path + "@" + str(copyfrom_rev), path_offset])
                 run_svn(["add", "--parents", path_offset])
@@ -677,14 +676,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, o
             out = run_svn(["merge", "-c", str(svn_rev), "--non-recursive",
                      "--non-interactive", "--accept=theirs-full",
                      m_url+"@"+str(svn_rev), m])
-            # if conflicts, use the copy from original_wc
-            # TODO: Is this handling even needed, now that we're passing --accept=theirs-full?
-            if out and out.split()[0] == 'C':
-                print "\n### Conflicts ignored: %s, in revision: %s\n" \
-                      % (m, svn_rev)
-                run_svn(["revert", "--recursive", m])
-                if os.path.isfile(m):
-                    shutil.copy(original_wc + os.sep + m, m)
 
     if unrelated_paths:
         print "Unrelated paths: (vs. '" + source_base + "')"
@@ -692,7 +683,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, o
 
     return commit_paths
 
-def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, original_wc, keep_author=False):
+def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_author=False):
     """
     Pull SVN changes from the given log entry.
     Returns the new SVN revision.
@@ -702,9 +693,7 @@ def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, original_w
     source_base = source_url[len(source_repos_url):]
 
     svn_rev = log_entry['revision']
-    run_svn(["up", "--ignore-externals", "-r", svn_rev, original_wc])
-    commit_paths = process_svn_log_entry(log_entry, source_repos_url,
-                                         source_url, target_url, original_wc)
+    commit_paths = process_svn_log_entry(log_entry, source_repos_url, source_url, target_url)
 
     # If we had too many individual paths to commit, wipe the list and just commit at
     # the root of the working copy.
@@ -712,47 +701,45 @@ def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, original_w
         commit_paths = []
 
     try:
-        commit_from_svn_log_entry(log_entry, commit_paths,
-                                  keep_author=keep_author)
+        commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author)
     except ExternalCommandFailed:
         # try to ignore the Properties conflicts on files and dirs
         # use the copy from original_wc
         # TODO: Need to re-work this?
-        has_Conflict = False
-        for d in log_entry['changed_paths']:
-            p = d['path']
-            p = p[len(source_base):].strip("/")
-            if os.path.isfile(p):
-                if os.path.isfile(p + ".prej"):
-                    has_Conflict = True
-                    shutil.copy(original_wc + os.sep + p, p)
-                    p2=os.sep + p.replace('_', '__').replace('/', '_') \
-                              + ".prej-" + str(svn_rev)
-                    shutil.move(p + ".prej", os.path.dirname(original_wc) + p2)
-                    w="\n### Properties conflicts ignored:"
-                    print "%s %s, in revision: %s\n" % (w, p, svn_rev)
-            elif os.path.isdir(p):
-                if os.path.isfile(p + os.sep + "dir_conflicts.prej"):
-                    has_Conflict = True
-                    p2=os.sep + p.replace('_', '__').replace('/', '_') \
-                              + "_dir__conflicts.prej-" + str(svn_rev)
-                    shutil.move(p + os.sep + "dir_conflicts.prej",
-                                os.path.dirname(original_wc) + p2)
-                    w="\n### Properties conflicts ignored:"
-                    print "%s %s, in revision: %s\n" % (w, p, svn_rev)
-                    out = run_svn(["propget", "svn:ignore",
-                                   original_wc + os.sep + p])
-                    if out:
-                        run_svn(["propset", "svn:ignore", out.strip(), p])
-                    out = run_svn(["propget", "svn:externel",
-                                   original_wc + os.sep + p])
-                    if out:
-                        run_svn(["propset", "svn:external", out.strip(), p])
-        # try again
-        if has_Conflict:
-            commit_from_svn_log_entry(log_entry, commit_paths,
-                                      keep_author=keep_author)
-        else:
+        #has_Conflict = False
+        #for d in log_entry['changed_paths']:
+        #    p = d['path']
+        #    p = p[len(source_base):].strip("/")
+        #    if os.path.isfile(p):
+        #        if os.path.isfile(p + ".prej"):
+        #            has_Conflict = True
+        #            shutil.copy(original_wc + os.sep + p, p)
+        #            p2=os.sep + p.replace('_', '__').replace('/', '_') \
+        #                      + ".prej-" + str(svn_rev)
+        #            shutil.move(p + ".prej", os.path.dirname(original_wc) + p2)
+        #            w="\n### Properties conflicts ignored:"
+        #            print "%s %s, in revision: %s\n" % (w, p, svn_rev)
+        #    elif os.path.isdir(p):
+        #        if os.path.isfile(p + os.sep + "dir_conflicts.prej"):
+        #            has_Conflict = True
+        #            p2=os.sep + p.replace('_', '__').replace('/', '_') \
+        #                      + "_dir__conflicts.prej-" + str(svn_rev)
+        #            shutil.move(p + os.sep + "dir_conflicts.prej",
+        #                        os.path.dirname(original_wc) + p2)
+        #            w="\n### Properties conflicts ignored:"
+        #            print "%s %s, in revision: %s\n" % (w, p, svn_rev)
+        #            out = run_svn(["propget", "svn:ignore",
+        #                           original_wc + os.sep + p])
+        #            if out:
+        #                run_svn(["propset", "svn:ignore", out.strip(), p])
+        #            out = run_svn(["propget", "svn:externel",
+        #                           original_wc + os.sep + p])
+        #            if out:
+        #                run_svn(["propset", "svn:external", out.strip(), p])
+        ## try again
+        #if has_Conflict:
+        #    commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author)
+        #else:
             raise ExternalCommandFailed
 
 
@@ -778,15 +765,14 @@ def main():
     else:
         keep_author = False
 
-    # Find the greatest_rev
-    # don't use 'svn info' to get greatest_rev, it doesn't work sometimes
-    svn_log = get_one_svn_log_entry(source_url, "HEAD", "HEAD")
-    greatest_rev = svn_log['revision']
+    # Find the greatest_rev in the source repo
+    svn_info = get_svn_info(source_url)
+    greatest_rev = svn_info['revision']
 
-    original_wc = "_original_wc"
     dup_wc = "_dup_wc"
 
-    ## old working copy does not exist, disable continue mode
+    # if old working copy does not exist, disable continue mode
+    # TODO: Better continue support. Maybe include source repo's rev # in target commit info?
     if not os.path.exists(dup_wc):
         options.cont_from_break = False
 
@@ -807,48 +793,45 @@ def main():
         # Get log entry for the SVN revision we will check out
         if options.svn_rev:
             # If specify a rev, get log entry just before or at rev
-            svn_start_log = get_last_svn_log_entry(source_url, 1,
-                                                   options.svn_rev)
+            svn_start_log = get_last_svn_log_entry(source_url, 1, options.svn_rev)
         else:
             # Otherwise, get log entry of branch creation
-            svn_start_log = get_first_svn_log_entry(source_url, 1,
-                                                    greatest_rev)
+            svn_start_log = get_first_svn_log_entry(source_url, 1, greatest_rev)
 
-        # This is the revision we will checkout from
+        # This is the revision we will start from for source_url
         svn_rev = svn_start_log['revision']
 
-        # Check out first revision (changeset) from Source SVN URL
-        if os.path.exists(original_wc):
-            shutil.rmtree(original_wc)
-        svn_checkout(source_url, original_wc, svn_rev)
-
-        # Import first revision (changeset) into Target SVN URL
-        # TODO: Rather than using "svn import" here, use "svn export" + "svn add"
-        #       so that we can uniformly run a pre-commit clean-up script.
-        timestamp = int(svn_start_log['date'])
-        svn_date = str(datetime.fromtimestamp(timestamp))
-        if keep_author:
-            run_svn(["import", original_wc, target_url, "-m",
-                    svn_start_log['message'] + "\nDate: " + svn_date,
-                    "--username", svn_start_log['author']])
-        else:
-            run_svn(["import", original_wc, target_url, "-m",
-                    svn_start_log['message'] + "\nDate: " + svn_date +
-                    "\nAuthor: " + svn_start_log['author']])
-
-        # Check out a working copy
+        # Check out a working copy of target_url
+        dup_wc = os.path.abspath(dup_wc)
         if os.path.exists(dup_wc):
             shutil.rmtree(dup_wc)
         svn_checkout(target_url, dup_wc)
+        os.chdir(dup_wc)
 
-    original_wc = os.path.abspath(original_wc)
-    dup_wc = os.path.abspath(dup_wc)
-    os.chdir(dup_wc)
+        # For the initial commit to the target URL, export all the contents from
+        # the source URL at the start-revision.
+        paths = run_svn(["list", "-r", str(svn_rev), source_url+"@"+str(svn_rev)])
+        paths = paths.strip("\n").split("\n")
+        for path in paths:
+            if not path:
+                # Skip null lines
+                break
+            # Directories have a trailing slash in the "svn list" output
+            if path[-1] == "/":
+                path=path.rstrip('/')
+                if not os.path.exists(path):
+                    os.makedirs(path)
+            print path
+            run_svn(["export", "--force", "-r" , str(svn_rev), source_url+"/"+path+"@"+str(svn_rev), path])
+            run_svn(["add", path])
+        commit_from_svn_log_entry(svn_start_log, [], keep_author)
+    else:
+        dup_wc = os.path.abspath(dup_wc)
+        os.chdir(dup_wc)
 
     # Get SVN info
     svn_info = get_svn_info(source_url)
-    # Get the base URL for the source repos
-    # e.g. u'svn://svn.example.com/svn/repo'
+    # Get the base URL for the source repos, e.g. u'svn://svn.example.com/svn/repo'
     source_repos_url = svn_info['repos_url']
 
     if options.cont_from_break:
@@ -861,8 +844,7 @@ def main():
 
     try:
         for log_entry in it_log_entries:
-            pull_svn_rev(log_entry, source_repos_url, source_url, target_url,
-                         original_wc, keep_author)
+            pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_author)
 
     except KeyboardInterrupt:
         print "\nStopped by user."
