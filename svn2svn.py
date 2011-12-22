@@ -48,10 +48,10 @@ svn_checkout_args = ['checkout', '-q']
 svn_status_args = ['status', '--xml', '-v', '--ignore-externals']
 
 # Setup debug options
-debug = True
+debug = False
 debug_runsvn_timing = False    # Display how long each "svn" OS command took to run?
 # Setup verbosity options
-runsvn_showcmd = True     # Display every "svn" OS command we run?
+runsvn_showcmd = False    # Display every "svn" OS command we run?
 runsvn_showout = False    # Display the stdout results from every  "svn" OS command we run?
 svnlog_verbose = True     # Display each action + changed-path as we walk the history?
 
@@ -368,7 +368,6 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False):
     if files:
         options += list(files)
     run_svn(options)
-    print ""
 
 def in_svn(p):
     """
@@ -588,7 +587,8 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
             if d['copyfrom_revision']:
                 copyfrom_rev = d['copyfrom_revision']
                 copyfrom_path = d['copyfrom_path']
-                print ">> process_svn_log_entry: copy-to: " + source_base + " " + source_offset + " " + path_offset
+                if debug:
+                    print ">> process_svn_log_entry: copy-to: " + source_base + " " + source_offset + " " + path_offset
                 if source_base in copyfrom_path:
                     # If the copy-from path is inside the current working-copy, no need to check ancestry.
                     ancestors = []
@@ -689,10 +689,16 @@ def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_autho
     Returns the new SVN revision.
     If an exception occurs, it will rollback to revision 'svn_rev - 1'.
     """
-    # Get the relative offset of source_url based on source_repos_url, e.g. u'/branches/bug123'
-    source_base = source_url[len(source_repos_url):]
+    ## Get the relative offset of source_url based on source_repos_url, e.g. u'/branches/bug123'
+    #source_base = source_url[len(source_repos_url):]
 
     svn_rev = log_entry['revision']
+    print "\n(Starting source rev #"+str(svn_rev)+":)"
+    print "r"+str(log_entry['revision']) + " | " + \
+          log_entry['author'] + " | " + \
+          str(datetime.fromtimestamp(int(log_entry['date'])).isoformat(' '))
+    print log_entry['message']
+    print "------------------------------------------------------------------------"
     commit_paths = process_svn_log_entry(log_entry, source_repos_url, source_url, target_url)
 
     # If we had too many individual paths to commit, wipe the list and just commit at
@@ -700,6 +706,8 @@ def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_autho
     if len (commit_paths) > 99:
         commit_paths = []
 
+    # TODO: Use SVN properties to track source URL + rev in the target repo?
+    #       This would provide a more reliable resume-support
     try:
         commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author)
     except ExternalCommandFailed:
@@ -741,6 +749,7 @@ def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_autho
         #    commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author)
         #else:
             raise ExternalCommandFailed
+    print "(Finished source rev #"+str(svn_rev)+")"
 
 
 def main():
@@ -821,7 +830,6 @@ def main():
                 path=path.rstrip('/')
                 if not os.path.exists(path):
                     os.makedirs(path)
-            print path
             run_svn(["export", "--force", "-r" , str(svn_rev), source_url+"/"+path+"@"+str(svn_rev), path])
             run_svn(["add", path])
         commit_from_svn_log_entry(svn_start_log, [], keep_author)
