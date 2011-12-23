@@ -645,10 +645,15 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
                     # ...but not if the target is already tracked, because this might run several times for the same path.
                     # TODO: Is there a better way to avoid recusion bugs? Maybe a collection of processed paths?
                     if not in_svn(path_offset):
-                        run_svn(["copy", '-r', dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
+                        run_svn(["copy", "-r", dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
                 else:
-                    # Replay any actions which happened to this folder from the ancestor path(s).
-                    replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url)
+                    if d['kind'] == 'dir':
+                        # Replay any actions which happened to this folder from the ancestor path(s).
+                        replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url)
+                    else:
+                        # Just do a straight "svn copy" for files. There isn't any kind of "dependent"
+                        # history we might need to replay like for folders.
+                        run_svn(["copy", "-r", dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
             else:
                 # Create (parent) directory if needed
                 if d['kind'] == 'dir':
@@ -867,7 +872,8 @@ def main():
         # TODO: Need better resume support. For the time being, expect caller explictly passes in resume revision.
         svn_rev = options.svn_rev
         if svn_rev < 1:
-            display_error("Invalid arguments\n\n"Need to pass result rev # (-r) when using continue-mode (-c)", False)
+            display_error("Invalid arguments\n\nNeed to pass result rev # (-r) when using continue-mode (-c)", False)
+
 
     # Get SVN info
     svn_info = get_svn_info(source_url)
