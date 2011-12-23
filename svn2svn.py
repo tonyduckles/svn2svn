@@ -511,9 +511,12 @@ def replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url):
         for log_entry in it_log_entries:
             #print ">> replay_svn_ancestors: log_entry: (" + source_repos_url+source_base + ")"
             #print log_entry
+            # TODO: Hit a problem case with a rename-situation where the "remove" was committed ahead of the "add (copy)".
+            #       Do we maybe need to buffer all the remove's until the end of the entire replay session?
+            #       Or can we maybe work around this by passing an explicit rev # into "svn copy"?
             process_svn_log_entry(log_entry, source_repos_url, source_repos_url+source_base, target_url)
 
-def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, source_offset=""):
+def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
     """
     Process SVN changes from the given log entry.
     Returns array of all the paths in the working-copy that were changed,
@@ -530,6 +533,9 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
         print ">> process_svn_log_entry: " + source_url + " (" + source_base + ")"
 
     svn_rev = log_entry['revision']
+    # Get current target revision, for "svn copy" support
+    dup_info = get_svn_info(target_url)
+    dup_rev = dup_info['revision']
 
     removed_paths = []
     modified_paths = []
@@ -598,7 +604,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
                 copyfrom_rev = d['copyfrom_revision']
                 copyfrom_path = d['copyfrom_path']
                 if debug:
-                    print ">> process_svn_log_entry: copy-to: " + source_base + " " + source_offset + " " + path_offset
+                    print ">> process_svn_log_entry: copy-to: " + source_base + " " + path_offset
                 if source_base in copyfrom_path:
                     # If the copy-from path is inside the current working-copy, no need to check ancestry.
                     ancestors = []
@@ -639,7 +645,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
                     # ...but not if the target is already tracked, because this might run several times for the same path.
                     # TODO: Is there a better way to avoid recusion bugs? Maybe a collection of processed paths?
                     if not in_svn(path_offset):
-                        run_svn(["copy", copyfrom_path, path_offset])
+                        run_svn(["copy", '-r', dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
                 else:
                     # Replay any actions which happened to this folder from the ancestor path(s).
                     replay_svn_ancestors(ancestors, source_repos_url, source_url, target_url)
@@ -858,16 +864,15 @@ def main():
     else:
         dup_wc = os.path.abspath(dup_wc)
         os.chdir(dup_wc)
+        # TODO: Need better resume support. For the time being, expect caller explictly passes in resume revision.
+        svn_rev = options.svn_rev
+        if svn_rev < 1:
+            display_error("Invalid arguments\n\n"Need to pass result rev # (-r) when using continue-mode (-c)", False)
 
     # Get SVN info
     svn_info = get_svn_info(source_url)
     # Get the base URL for the source repos, e.g. u'svn://svn.example.com/svn/repo'
     source_repos_url = svn_info['repos_url']
-
-    if options.cont_from_break:
-        svn_rev = svn_info['revision'] - 1
-        if svn_rev < 1:
-            svn_rev = 1
 
     # Load SVN log starting from svn_rev + 1
     it_log_entries = iter_svn_log_entries(source_url, svn_rev + 1, greatest_rev)
