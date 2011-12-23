@@ -369,6 +369,7 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False):
         options = ["ci", "--force-log", "-m", entry['message'] + "\nDate: " + svn_date + "\nAuthor: " + entry['author']]
     if files:
         options += list(files)
+    print "(Committing source rev #"+str(entry['revision'])+"...)"
     run_svn(options)
 
 def in_svn(p):
