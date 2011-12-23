@@ -42,7 +42,7 @@ except ImportError:
         except ImportError:
             from elementtree import ElementTree as ET
 
-svn_log_args = ['log', '--xml', '-v']
+svn_log_args = ['log', '--xml']
 svn_info_args = ['info', '--xml']
 svn_checkout_args = ['checkout', '-q']
 svn_status_args = ['status', '--xml', '-v', '--ignore-externals']
@@ -256,7 +256,7 @@ def svn_checkout(svn_url, checkout_dir, rev_number=None):
     args += [svn_url, checkout_dir]
     return run_svn(svn_checkout_args + args)
 
-def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False):
+def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, get_changed_paths=True):
     """
     Fetch up to 'limit' SVN log entries between the given revisions.
     """
@@ -269,6 +269,8 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False):
         args += ['-r', '%s:%s' % (rev_start, rev_end)]
         if not "@" in svn_url_or_wc:
             url += "@" + str(max(rev_start, rev_end))
+    if get_changed_paths:
+        args += ['-v']
     args += ['--limit', str(limit), url]
     xml_string = run_svn(svn_log_args + args)
     return parse_svn_log_xml(xml_string)
@@ -286,18 +288,18 @@ def get_svn_status(svn_wc, flags=None):
     xml_string = run_svn(svn_status_args + args)
     return parse_svn_status_xml(xml_string, svn_wc)
 
-def get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=False):
+def get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=False, get_changed_paths=True):
     """
     Get the first SVN log entry in the requested revision range.
     """
-    entries = run_svn_log(svn_url, rev_start, rev_end, 1, stop_on_copy)
+    entries = run_svn_log(svn_url, rev_start, rev_end, 1, stop_on_copy, get_changed_paths)
     if not entries:
         display_error("No SVN log for %s between revisions %s and %s" %
                       (svn_url, rev_start, rev_end))
 
     return entries[0]
 
-def get_first_svn_log_entry(svn_url, rev_start, rev_end):
+def get_first_svn_log_entry(svn_url, rev_start, rev_end, get_changed_paths=True):
     """
     Get the first log entry after/at the given revision number in an SVN branch.
     By default the revision number is set to 0, which will give you the log
@@ -307,15 +309,15 @@ def get_first_svn_log_entry(svn_url, rev_start, rev_end):
     a copy from another branch, inspect elements of the 'changed_paths' entry
     in the returned dictionary.
     """
-    return get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=True)
+    return get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=True, get_changed_paths=True)
 
-def get_last_svn_log_entry(svn_url, rev_start, rev_end):
+def get_last_svn_log_entry(svn_url, rev_start, rev_end, get_changed_paths=True):
     """
     Get the last log entry before/at the given revision number in an SVN branch.
     By default the revision number is set to HEAD, which will give you the log
     entry corresponding to the latest commit in branch.
     """
-    return get_one_svn_log_entry(svn_url, rev_end, rev_start, stop_on_copy=True)
+    return get_one_svn_log_entry(svn_url, rev_end, rev_start, stop_on_copy=True, get_changed_paths=True)
 
 
 log_duration_threshold = 10.0
@@ -414,7 +416,7 @@ def find_svn_ancestors(source_repos_url, source_base, source_offset, copyfrom_pa
         if debug:
             print ">> find_svn_ancestors: " + source_repos_url + working_path + "@" + str(working_rev) + \
                    "  (" + working_base + " " + working_offset + ")"
-        log_entry = get_first_svn_log_entry(source_repos_url + working_path + "@" + str(working_rev), 1, str(working_rev))
+        log_entry = get_first_svn_log_entry(source_repos_url + working_path + "@" + str(working_rev), 1, str(working_rev), True)
         if not log_entry:
             done = True
         # Find the action for our working_path in this revision
@@ -567,6 +569,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
             commit_paths.append(path_offset)
 
         # Special-handling for replace's
+        is_replace = False
         if action == 'R':
             # If file was "replaced" (deleted then re-added, all in same revision),
             # then we need to run the "svn rm" first, then change action='A'. This
@@ -575,6 +578,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
             run_svn(["up", path_offset])
             run_svn(["remove", "--force", path_offset])
             action = 'A'
+            is_replace = True
 
         # Handle all the various action-types
         # (Handle "add" first, for "svn copy/move" support)
@@ -644,7 +648,11 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
                 # Export the entire added tree.
                 run_svn(["export", "--force", "-r", str(copyfrom_rev),
                          source_repos_url + copyfrom_path + "@" + str(copyfrom_rev), path_offset])
-                if not in_svn(path_offset):
+                # TODO: The "no in_svn" condition here is wrong for replace cases.
+                #       Added the in_svn condition here originally since "svn export" is recursive
+                #       but "svn log" will have an entry for each indiv file, hence we run into a
+                #       cannot-re-add-file-which-is-already-added issue.
+                if (not in_svn(path_offset)) or (is_replace):
                     run_svn(["add", "--parents", path_offset])
                 # TODO: Need to copy SVN properties from source repos
 
@@ -803,13 +811,13 @@ def main():
         # Get log entry for the SVN revision we will check out
         if options.svn_rev:
             # If specify a rev, get log entry just before or at rev
-            svn_start_log = get_last_svn_log_entry(source_url, 1, options.svn_rev)
+            svn_start_log = get_last_svn_log_entry(source_url, 1, options.svn_rev, False)
         else:
             # Otherwise, get log entry of branch creation
             # TODO: This call is *very* expensive on a repo with lots of revisions.
             #       Even though the call is passing --limit 1, it seems like that limit-filter
             #       is happening after SVN has fetched the full log history.
-            svn_start_log = get_first_svn_log_entry(source_url, 1, greatest_rev)
+            svn_start_log = get_first_svn_log_entry(source_url, 1, greatest_rev, False)
 
         # This is the revision we will start from for source_url
         svn_rev = svn_start_log['revision']
@@ -856,7 +864,10 @@ def main():
 
     try:
         for log_entry in it_log_entries:
+            # Replay this revision from source_url into target_url
             pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_author)
+            # Update our target working-copy, to ensure everything says it's at the new HEAD revision
+            run_svn(["up", dup_wc])
 
     except KeyboardInterrupt:
         print "\nStopped by user."
