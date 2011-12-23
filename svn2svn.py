@@ -537,11 +537,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
     commit_paths = []
 
     for d in log_entry['changed_paths']:
-        if svnlog_verbose:
-            msg = " " + d['action'] + " " + d['path']
-            if d['copyfrom_path']:
-                msg += " (from " + d['copyfrom_path'] + "@" + str(d['copyfrom_revision']) + ")"
-            print msg
         # Get the full path for this changed_path
         # e.g. u'/branches/bug123/projectA/file1.txt'
         path = d['path']
@@ -572,6 +567,11 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
         # Special-handling for replace's
         is_replace = False
         if action == 'R':
+            if svnlog_verbose:
+                msg = " " + d['action'] + " " + d['path']
+                if d['copyfrom_path']:
+                    msg += " (from " + d['copyfrom_path'] + "@" + str(d['copyfrom_revision']) + ")"
+                print msg
             # If file was "replaced" (deleted then re-added, all in same revision),
             # then we need to run the "svn rm" first, then change action='A'. This
             # lets the normal code below handle re-"svn add"'ing the files. This
@@ -584,6 +584,11 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
         # Handle all the various action-types
         # (Handle "add" first, for "svn copy/move" support)
         if action == 'A':
+            if svnlog_verbose:
+                msg = " " + d['action'] + " " + d['path']
+                if d['copyfrom_path']:
+                    msg += " (from " + d['copyfrom_path'] + "@" + str(d['copyfrom_revision']) + ")"
+                print msg
             # Determine where to export from
             copyfrom_rev = svn_rev
             copyfrom_path = path
@@ -674,12 +679,16 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, s
 
     if removed_paths:
         for r in removed_paths:
+            if svnlog_verbose:
+                print " D " + r
             # TODO: Is the "svn up" here needed?
             run_svn(["up", r])
             run_svn(["remove", "--force", r])
 
     if modified_paths:
         for m in modified_paths:
+            if svnlog_verbose:
+                print " M " + m
             # TODO: Is the "svn up" here needed?
             run_svn(["up", m])
             m_url = source_url + "/" + m
