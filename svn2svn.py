@@ -30,6 +30,7 @@ import traceback
 from optparse import OptionParser
 from subprocess import Popen, PIPE
 from datetime import datetime
+from operator import itemgetter
 
 try:
     from xml.etree import cElementTree as ET
@@ -191,7 +192,7 @@ def parse_svn_log_xml(xml_string):
         # Replace DOS return '\r\n' and MacOS return '\r' with unix return '\n'
         d['message'] = message.replace('\r\n', '\n').replace('\n\r', '\n'). \
                                replace('\r', '\n')
-        paths = d['changed_paths'] = []
+        paths = []
         for path in entry.findall('.//path'):
             copyfrom_rev = path.get('copyfrom-rev')
             if copyfrom_rev:
@@ -205,7 +206,7 @@ def parse_svn_log_xml(xml_string):
             })
         # Need to sort paths (i.e. into hierarchical order), so that process_svn_log_entry()
         # can process actions in depth-first order.
-        paths.sort()
+        d['changed_paths'] = sorted(paths, key=itemgetter('path'))
         l.append(d)
     return l
 
@@ -574,7 +575,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
         is_replace = False
         if action == 'R':
             if svnlog_verbose:
-                msg = " " + d['action'] + " " + d['path']
+                msg = " " + action + " " + d['path']
                 if d['copyfrom_path']:
                     msg += " (from " + d['copyfrom_path'] + "@" + str(d['copyfrom_revision']) + ")"
                 print msg
@@ -591,7 +592,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
         # (Handle "add" first, for "svn copy/move" support)
         if action == 'A':
             if svnlog_verbose:
-                msg = " " + d['action'] + " " + d['path']
+                msg = " " + action + " " + d['path']
                 if d['copyfrom_path']:
                     msg += " (from " + d['copyfrom_path'] + "@" + str(d['copyfrom_revision']) + ")"
                 print msg
