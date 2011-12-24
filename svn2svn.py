@@ -637,7 +637,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
                     #print ">> process_svn_log_entry: copyfrom_path (after): " + copyfrom_path
                     svn_copy = True
             # If this add was a copy-from, do a smart replay of the ancestors' history.
-            # Else just copy/export the files from the source repo and "svn add" them.
             if svn_copy:
                 if debug:
                     print ">> process_svn_log_entry: svn_copy: copy-from: " + copyfrom_path+"@"+str(copyfrom_rev) + "  source_base: "+source_base + "  len(ancestors): " + str(len(ancestors))
@@ -646,7 +645,11 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
                     # ...but not if the target is already tracked, because this might run several times for the same path.
                     # TODO: Is there a better way to avoid recusion bugs? Maybe a collection of processed paths?
                     if not in_svn(path_offset):
-                        run_svn(["copy", "-r", dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
+                        if os.path.exists(copyfrom_path):
+                            # If the copyfrom_path exists in the working-copy, do a local copy
+                            run_svn(["copy", copyfrom_path, path_offset])
+                        else:
+                            run_svn(["copy", "-r", dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
                 else:
                     if d['kind'] == 'dir':
                         # Replay any actions which happened to this folder from the ancestor path(s).
@@ -654,7 +657,19 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
                     else:
                         # Just do a straight "svn copy" for files. There isn't any kind of "dependent"
                         # history we might need to replay like for folders.
-                        run_svn(["copy", "-r", dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
+                        # TODO: Is this logic really correct? Doing a WC vs URL "svn copy" based on existence
+                        #       of *source* location seems a bit kludgy. Should there be a running list of
+                        #       renames during replay_svn_ancestors >> process_svn_log_entry?
+                        if os.path.exists(copyfrom_path):
+                            # If the copyfrom_path exists in the working-copy, do a local copy
+                            run_svn(["copy", copyfrom_path, path_offset])
+                        else:
+                            # Else, could be a situation where replay_svn_ancestors() is replaying branch
+                            # history and a copy was committed across two revisions: first the deletion
+                            # followed by the later add. In such a case, we need to copy from HEAD (dup_rev)
+                            # of the path in *target_url*
+                            run_svn(["copy", "-r", dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
+            # Else just copy/export the files from the source repo and "svn add" them.
             else:
                 # Create (parent) directory if needed
                 if d['kind'] == 'dir':
