@@ -539,7 +539,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
     dup_rev = dup_info['revision']
 
     removed_paths = []
-    modified_paths = []
     unrelated_paths = []
     commit_paths = []
 
@@ -694,34 +693,21 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
             # to do smart "svn copy" handling on copy/move/renames.
             removed_paths.append(path_offset)
 
-        elif action == 'R':
-            # TODO
-            display_error("Internal Error: Handling for action='R' not implemented yet.")
-
         elif action == 'M':
-            modified_paths.append(path_offset)
+            if svnlog_verbose:
+                print " " + action + " " + d['path']
+            out = run_svn(["merge", "-c", str(svn_rev), "--non-recursive",
+                     "--non-interactive", "--accept=theirs-full",
+                     source_url+"/"+path_offset+"@"+str(svn_rev), path_offset])
 
         else:
             display_error("Internal Error: pull_svn_rev: Unhandled 'action' value: '" + action + "'")
 
     if removed_paths:
-        for r in removed_paths:
+        for path_offset in removed_paths:
             if svnlog_verbose:
-                print " D " + r
-            # TODO: Is the "svn up" here needed?
-            run_svn(["up", r])
-            run_svn(["remove", "--force", r])
-
-    if modified_paths:
-        for m in modified_paths:
-            if svnlog_verbose:
-                print " M " + m
-            # TODO: Is the "svn up" here needed?
-            run_svn(["up", m])
-            m_url = source_url + "/" + m
-            out = run_svn(["merge", "-c", str(svn_rev), "--non-recursive",
-                     "--non-interactive", "--accept=theirs-full",
-                     m_url+"@"+str(svn_rev), m])
+                print " D " + source_url+"/"+path_offset
+            run_svn(["remove", "--force", path_offset])
 
     if unrelated_paths:
         print "Unrelated paths: (vs. '" + source_base + "')"
