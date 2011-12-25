@@ -227,6 +227,7 @@ def parse_svn_status_xml(xml_string, base_dir=None):
         wc_status = entry.find('wc-status')
         if wc_status.get('item') == 'external':
             d['type'] = 'external'
+        # TODO: Optionally check wc_status.get('item') == 'deleted' and return type='unversioned'?
         elif wc_status.get('revision') is not None:
             d['type'] = 'normal'
         else:
@@ -643,12 +644,21 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
                 if not ancestors:
                     # ...but not if the target is already tracked, because this might run several times for the same path.
                     # TODO: Is there a better way to avoid recusion bugs? Maybe a collection of processed paths?
-                    if not in_svn(path_offset):
+                    # TODO: The "not in_svn" check creates problems for action="R" cases, e.g. r18834
+                    if (not in_svn(path_offset)) or is_replace:
                         if os.path.exists(copyfrom_path):
                             # If the copyfrom_path exists in the working-copy, do a local copy
                             run_svn(["copy", copyfrom_path, path_offset])
                         else:
-                            run_svn(["copy", "-r", dup_rev, target_url+"/"+copyfrom_path+"@"+str(dup_rev), path_offset])
+                            # TODO: This doesn't respect copyfrom_rev at all. Found a case where file was (accidentally?)
+                            #       deleted in one commit and restored (added copy-from) in a latter commit. Do we maybe
+                            #       need a mapping table of target_url -> source_url rev #'s, so that given a source_url
+                            #       copyfrom_rev, we can map that to the equiv target_url rev#, so we do the "svn copy"
+                            #       here correctly?
+                            tmp_rev = dup_rev  # Kludge for time-being
+                            if copyfrom_path == 'Data/Databases/DBUpdate.mdb' and copyfrom_rev == 17568:
+                                tmp_rev = dup_rev-10
+                            run_svn(["copy", "-r", tmp_rev, target_url+"/"+copyfrom_path+"@"+str(tmp_rev), path_offset])
                 else:
                     if d['kind'] == 'dir':
                         # Replay any actions which happened to this folder from the ancestor path(s).
