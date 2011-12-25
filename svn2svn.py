@@ -706,7 +706,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
     if removed_paths:
         for path_offset in removed_paths:
             if svnlog_verbose:
-                print " D " + source_url+"/"+path_offset
+                print " D " + source_base+"/"+path_offset
             run_svn(["remove", "--force", path_offset])
 
     if unrelated_paths:
