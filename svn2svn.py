@@ -166,6 +166,7 @@ def parse_svn_info_xml(xml_string):
         d['url'] = entry.find('url').text
         d['revision'] = int(entry.get('revision'))
         d['repos_url'] = tree.find('.//repository/root').text
+        d['repos_uuid'] = tree.find('.//repository/uuid').text
         d['last_changed_rev'] = int(tree.find('.//commit').get('revision'))
         d['kind'] = entry.get('kind')
     return d
@@ -725,7 +726,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url):
 
     return commit_paths
 
-def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_author=False):
+def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, target_url, keep_author=False):
     """
     Pull SVN changes from the given log entry.
     Returns the new SVN revision.
@@ -791,6 +792,11 @@ def pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_autho
         #    commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author)
         #else:
             raise ExternalCommandFailed
+
+    # Add source-tracking revprop's
+    run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_uuid", source_repos_uuid])
+    run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_url", source_repos_url])
+    run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_rev", svn_rev])
     print "(Finished source rev #"+str(svn_rev)+")"
 
 
@@ -819,6 +825,10 @@ def main():
     # Find the greatest_rev in the source repo
     svn_info = get_svn_info(source_url)
     greatest_rev = svn_info['revision']
+    # Get the base URL for the source repos, e.g. u'svn://svn.example.com/svn/repo'
+    source_repos_url = svn_info['repos_url']
+    # Get the UUID for the source repos
+    source_repos_uuid = svn_info['repos_uuid']
 
     dup_wc = "_dup_wc"
 
@@ -878,6 +888,10 @@ def main():
             run_svn(["export", "--force", "-r" , str(svn_rev), source_url+"/"+path+"@"+str(svn_rev), path])
             run_svn(["add", path])
         commit_from_svn_log_entry(svn_start_log, [], keep_author)
+        # Add source-tracking revprop's
+        run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_uuid", source_repos_uuid])
+        run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_url", source_repos_url])
+        run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_rev", svn_rev])
     else:
         dup_wc = os.path.abspath(dup_wc)
         os.chdir(dup_wc)
@@ -886,19 +900,13 @@ def main():
         if svn_rev < 1:
             display_error("Invalid arguments\n\nNeed to pass result rev # (-r) when using continue-mode (-c)", False)
 
-
-    # Get SVN info
-    svn_info = get_svn_info(source_url)
-    # Get the base URL for the source repos, e.g. u'svn://svn.example.com/svn/repo'
-    source_repos_url = svn_info['repos_url']
-
     # Load SVN log starting from svn_rev + 1
     it_log_entries = iter_svn_log_entries(source_url, svn_rev + 1, greatest_rev)
 
     try:
         for log_entry in it_log_entries:
             # Replay this revision from source_url into target_url
-            pull_svn_rev(log_entry, source_repos_url, source_url, target_url, keep_author)
+            pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, target_url, keep_author)
             # Update our target working-copy, to ensure everything says it's at the new HEAD revision
             run_svn(["up", dup_wc])
 
