@@ -77,13 +77,12 @@ ACTION="\$5"
 
 echo "pre-revprop-change: REPOS=\$1 REV=\$2 USER=\$3 PROPNAME=\$4 ACTION=\$5" >&2
 
+# Allow modifying svn:log
 if [ "\$ACTION" = "M" -a "\$PROPNAME" = "svn:log" ]; then exit 0; fi
+# Allow svn2svn to add svn2svn source-tracking properties
 if [ "\$ACTION" = "A" -a "\$PROPNAME" = "svn2svn:source_uuid" ]; then exit 0; fi
-if [ "\$ACTION" = "M" -a "\$PROPNAME" = "svn2svn:source_uuid" ]; then exit 0; fi
 if [ "\$ACTION" = "A" -a "\$PROPNAME" = "svn2svn:source_url" ]; then exit 0; fi
-if [ "\$ACTION" = "M" -a "\$PROPNAME" = "svn2svn:source_url" ]; then exit 0; fi
 if [ "\$ACTION" = "A" -a "\$PROPNAME" = "svn2svn:source_rev" ]; then exit 0; fi
-if [ "\$ACTION" = "M" -a "\$PROPNAME" = "svn2svn:source_rev" ]; then exit 0; fi
 
 echo "Changing revision property \$PROPNAME is prohibited" >&2
 exit 1
