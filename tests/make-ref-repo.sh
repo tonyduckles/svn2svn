@@ -11,7 +11,7 @@ show_last_commit() {
         url=$(svn info $WC | grep "URL:" | cut -c$len-)
         url="($url)"
     fi
-    printf "%-6s%-20s%s\n" "$revision" "$url" "$comment"
+    printf "%-6s%-22s%s\n" "$revision" "$url" "$comment"
 }
 
 svn_commit() {
@@ -101,7 +101,7 @@ svn_commit "Test 4: Replace Module/ProjectA/FileA1.txt"
 
 # Test #5: Rename files + folders
 # * Test rename support
-# * Create complicated find-ancestors case, where files/folders are renamed multiple times on branch
+# * Create complex find-ancestors case, where files are renamed within a renamed folder on a branch
 BRANCH="$REPOURL/branches/test5"
 svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
@@ -111,10 +111,10 @@ svn mv -q Module/ProjectC/FileB1.txt Module/ProjectC/FileC1.txt
 echo "Module/ProjectC/FileC1.txt (Test 5)" >> $WC/Module/ProjectC/FileC1.txt
 svn mv -q Module/ProjectC/FileB2.txt Module/ProjectC/FileC2.txt
 echo "Module/ProjectC/FileC2.txt (Test 5)" >> $WC/Module/ProjectC/FileC2.txt
-svn_commit "Test 4: Rename Module/ProjectB -> Module/ProjectC"
+svn_commit "Test 5: Rename Module/ProjectB -> Module/ProjectC"
 svn switch -q $TRUNK
 svn merge -q $BRANCH
-svn_commit "Test 4: Rename Module/ProjectB -> Module/ProjectC"
+svn_commit "Test 5: Rename Module/ProjectB -> Module/ProjectC"
 
 # Test #6: Verify rename
 BRANCH="$REPOURL/branches/test6"
@@ -184,13 +184,21 @@ svn mv -q Module/ProjectD/FileC3.txt Module/ProjectD/FileD1.txt
 echo "Module/ProjectD/FileD1.txt (Test 11)" >> $WC/Module/ProjectD/FileD1.txt
 svn mv -q Module/ProjectD/FileC4.txt Module/ProjectD/FileD2.txt
 echo "Module/ProjectD/FileD2.txt (Test 11)" >> $WC/Module/ProjectD/FileD2.txt
-svn_commit "Test 11: Rename Module/ProjectC -> Module/ProjectD"
+svn_commit "Test 11: Rename Module/ProjectC -> Module/ProjectD (part 1 of 2)" Module/ProjectC Module/ProjectD/FileC3.txt Module/ProjectD/FileC4.txt
+svn_commit "Test 11: Rename Module/ProjectC -> Module/ProjectD (part 2 of 2)"
+BRANCH="$REPOURL/branches/test11-1"
+svn copy -q -m "Create branch" $TRUNK $BRANCH
+svn switch -q $BRANCH
+show_last_commit
+svn merge -q $REPOURL/branches/test11
+svn_commit "Test 11: Re-branch"
 svn mv -q Module/ProjectD Module/ProjectE
 svn mv -q Module/ProjectE/FileD1.txt Module/ProjectE/FileE1.txt
 echo "Module/ProjectE/FileE1.txt (Test 11-1)" >> $WC/Module/ProjectE/FileE1.txt
 svn mv -q Module/ProjectE/FileD2.txt Module/ProjectE/FileE2.txt
 echo "Module/ProjectE/FileE2.txt (Test 11-1)" >> $WC/Module/ProjectE/FileE2.txt
-svn_commit "Test 11: Rename Module/ProjectD -> Module/ProjectE"
+svn_commit "Test 11: Rename Module/ProjectD -> Module/ProjectE (part 1 of 2)" Module/ProjectD Module/ProjectE/FileD1.txt Module/ProjectE/FileD2.txt
+svn_commit "Test 11: Rename Module/ProjectD -> Module/ProjectE (part 2 of 2)"
 svn switch -q $TRUNK
 svn merge -q $BRANCH
 svn_commit "Test 11: Rename Module/ProjectC -> Module/ProjectE"
