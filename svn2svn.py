@@ -50,11 +50,11 @@ svn_status_args = ['status', '--xml', '-v', '--ignore-externals']
 
 # Setup debug options
 debug = False
-debug_runsvn_timing = False    # Display how long each "svn" OS command took to run?
+runsvn_timing = False     # Display how long each "svn" OS command took to run?
 # Setup verbosity options
 runsvn_showcmd = False    # Display every "svn" OS command we run?
 runsvn_showout = False    # Display the stdout results from every  "svn" OS command we run?
-svnlog_verbose = True     # Display each action + changed-path as we walk the history?
+svnlog_verbose = False    # Display each action + changed-path as we walk the history?
 
 # define exception class
 class ExternalCommandFailed(RuntimeError):
@@ -139,11 +139,11 @@ def run_svn(args, fail_if_stderr=False, ignore_retcode_err=False, encoding="utf-
         if args[0] in status_cmds:
             color = "34"
         print "\x1b[34m"+"$"+"\x1b["+color+"m", cmd_string + "\x1b[0m"
-    if debug_runsvn_timing:
+    if runsvn_timing:
         time1 = time.time()
     pipe = Popen([cmd] + t_args, executable=cmd, stdout=PIPE, stderr=PIPE)
     out, err = pipe.communicate()
-    if debug_runsvn_timing:
+    if runsvn_timing:
         time2 = time.time()
         print "(" + str(round(time2-time1,4)) + " elapsed)"
     if out and runsvn_showout:
@@ -801,65 +801,27 @@ def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, tar
     if len (commit_paths) > 99:
         commit_paths = []
 
-    try:
-        commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author)
-    except ExternalCommandFailed:
-        # try to ignore the Properties conflicts on files and dirs
-        # use the copy from original_wc
-        # TODO: Need to re-work this?
-        #has_Conflict = False
-        #for d in log_entry['changed_paths']:
-        #    p = d['path']
-        #    p = p[len(path_base):].strip("/")
-        #    if os.path.isfile(p):
-        #        if os.path.isfile(p + ".prej"):
-        #            has_Conflict = True
-        #            shutil.copy(original_wc + os.sep + p, p)
-        #            p2=os.sep + p.replace('_', '__').replace('/', '_') \
-        #                      + ".prej-" + str(source_rev)
-        #            shutil.move(p + ".prej", os.path.dirname(original_wc) + p2)
-        #            w="\n### Properties conflicts ignored:"
-        #            print "%s %s, in revision: %s\n" % (w, p, source_rev)
-        #    elif os.path.isdir(p):
-        #        if os.path.isfile(p + os.sep + "dir_conflicts.prej"):
-        #            has_Conflict = True
-        #            p2=os.sep + p.replace('_', '__').replace('/', '_') \
-        #                      + "_dir__conflicts.prej-" + str(source_rev)
-        #            shutil.move(p + os.sep + "dir_conflicts.prej",
-        #                        os.path.dirname(original_wc) + p2)
-        #            w="\n### Properties conflicts ignored:"
-        #            print "%s %s, in revision: %s\n" % (w, p, source_rev)
-        #            out = run_svn(["propget", "svn:ignore",
-        #                           original_wc + os.sep + p])
-        #            if out:
-        #                run_svn(["propset", "svn:ignore", out.strip(), p])
-        #            out = run_svn(["propget", "svn:externel",
-        #                           original_wc + os.sep + p])
-        #            if out:
-        #                run_svn(["propset", "svn:external", out.strip(), p])
-        ## try again
-        #if has_Conflict:
-        #    commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author)
-        #else:
-            raise ExternalCommandFailed
-
     # Add source-tracking revprop's
     run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_uuid", source_repos_uuid])
     run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_url", source_url])
     run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_rev", source_rev])
     print "(Finished source rev #"+str(source_rev)+")"
 
-
 def main():
     usage = "Usage: %prog [-a] [-c] [-r SVN rev] <Source SVN URL> <Target SVN URL>"
     parser = OptionParser(usage)
-    parser.add_option("-a", "--keep-author", action="store_true",
-                      dest="keep_author", help="Keep revision Author or not")
-    parser.add_option("-c", "--continue-from-break", action="store_true",
-                      dest="cont_from_break",
-                      help="Continue from previous break")
-    parser.add_option("-r", "--svn-rev", type="int", dest="svn_rev",
-                      help="SVN revision to checkout from")
+    parser.add_option("-a", "--keep-author", action="store_true", dest="keep_author",
+                      help="maintain original Author info from source repo")
+    parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
+                      help="continue from previous break")
+    parser.add_option("-r", type="int", dest="svn_rev",
+                      help="initial SVN revision to checkout from")
+    parser.add_option("-v", "--verbose", action="store_true", dest="verbose",
+                      help="display 'svn status'-like info for each action+changed-path being replayed")
+    parser.add_option("--debug-showcmds", action="store_true", dest="debug_showcmds",
+                      help="display each SVN command being executed")
+    parser.add_option("--debug-debugmsgs", action="store_true", dest="debug_debugmsgs",
+                      help="display debug messages")
     (options, args) = parser.parse_args()
     if len(args) != 2:
         display_error("incorrect number of arguments\n\nTry: svn2svn.py --help",
@@ -882,6 +844,16 @@ def main():
 
     dup_wc = "_dup_wc"
     rev_map = {}
+    global debug
+    global runsvn_showcmd
+    global svnlog_verbose
+
+    if options.debug_debugmsgs:
+        debug = True
+    if options.debug_showcmds:
+        runsvn_showcmd = True
+    if options.verbose:
+        svnlog_verbose = True
 
     # if old working copy does not exist, disable continue mode
     # TODO: Better continue support. Maybe include source repo's rev # in target commit info?
