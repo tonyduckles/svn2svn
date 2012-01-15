@@ -373,7 +373,7 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
         elif duration > log_duration_threshold * 2:
             chunk_length = max(log_min_chunk_length, int(chunk_length / 2.0))
 
-def commit_from_svn_log_entry(entry, files=None, keep_author=False):
+def commit_from_svn_log_entry(entry, files=None, keep_author=False, revprops=[]):
     """
     Given an SVN log entry and an optional sequence of files, do an svn commit.
     """
@@ -387,6 +387,9 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False):
         options = ["ci", "--force-log", "-m", entry['message'] + "\nDate: " + svn_date, "--username", entry['author']]
     else:
         options = ["ci", "--force-log", "-m", entry['message'] + "\nDate: " + svn_date + "\nAuthor: " + entry['author']]
+    if revprops:
+        for r in revprops:
+            options += ["--with-revprop", r['name']+"="+str(r['value'])]
     if files:
         options += list(files)
     print "(Committing source rev #"+str(entry['revision'])+"...)"
@@ -769,19 +772,22 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
 
     return commit_paths
 
+def disp_svn_log_summary(log_entry):
+    print "\n(Starting source rev #"+str(log_entry['revision'])+":)"
+    print "r"+str(log_entry['revision']) + " | " + \
+          log_entry['author'] + " | " + \
+          str(datetime.fromtimestamp(int(log_entry['date'])).isoformat(' '))
+    print log_entry['message']
+    print "------------------------------------------------------------------------"
+
 def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, target_url, rev_map, keep_author=False):
     """
     Pull SVN changes from the given log entry.
     Returns the new SVN revision.
     If an exception occurs, it will rollback to revision 'source_rev - 1'.
     """
+    disp_svn_log_summary(log_entry)
     source_rev = log_entry['revision']
-    print "\n(Starting source rev #"+str(source_rev)+":)"
-    print "r"+str(log_entry['revision']) + " | " + \
-          log_entry['author'] + " | " + \
-          str(datetime.fromtimestamp(int(log_entry['date'])).isoformat(' '))
-    print log_entry['message']
-    print "------------------------------------------------------------------------"
 
     # Process all the paths in this log entry
     removed_paths = []
@@ -802,9 +808,10 @@ def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, tar
         commit_paths = []
 
     # Add source-tracking revprop's
-    run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_uuid", source_repos_uuid])
-    run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_url", source_url])
-    run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_rev", source_rev])
+    revprops = [{'name':'source_uuid', 'value':source_repos_uuid},
+                {'name':'source_url',  'value':source_url},
+                {'name':'source_rev',  'value':source_rev}]
+    commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author, revprops=revprops)
     print "(Finished source rev #"+str(source_rev)+")"
 
 def main():
@@ -886,7 +893,7 @@ def main():
             svn_start_log = get_first_svn_log_entry(source_url, 1, greatest_rev, False)
 
         # This is the revision we will start from for source_url
-        svn_rev = svn_start_log['revision']
+        source_rev = svn_start_log['revision']
 
         # Check out a working copy of target_url
         dup_wc = os.path.abspath(dup_wc)
@@ -897,35 +904,39 @@ def main():
 
         # For the initial commit to the target URL, export all the contents from
         # the source URL at the start-revision.
-        paths = run_svn(["list", "-r", str(svn_rev), source_url+"@"+str(svn_rev)])
+        paths = run_svn(["list", "-r", str(source_rev), source_url+"@"+str(source_rev)])
         if len(paths)>1:
+            disp_svn_log_summary(get_one_svn_log_entry(source_url, source_rev, source_rev))
+            print "(Initial import)"
             paths = paths.strip("\n").split("\n")
             for path in paths:
+                # For each top-level file/folder...
                 if not path:
                     # Skip null lines
                     break
                 # Directories have a trailing slash in the "svn list" output
-                if path[-1] == "/":
+                path_is_dir = True if path[-1] == "/" else False
+                if path_is_dir:
                     path=path.rstrip('/')
                     if not os.path.exists(path):
                         os.makedirs(path)
-                run_svn(["export", "--force", "-r" , str(svn_rev), source_url+"/"+path+"@"+str(svn_rev), path])
+                run_svn(["export", "--force", "-r" , str(source_rev), source_url+"/"+path+"@"+str(source_rev), path])
                 run_svn(["add", path])
-            commit_from_svn_log_entry(svn_start_log, [], keep_author)
-            # Add source-tracking revprop's
-            run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_uuid", source_repos_uuid])
-            run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_url", source_url])
-            run_svn(["propset", "--revprop", "-r", "HEAD", "svn2svn:source_rev", svn_rev])
+            revprops = [{'name':'source_uuid', 'value':source_repos_uuid},
+                        {'name':'source_url',  'value':source_url},
+                        {'name':'source_rev',  'value':source_rev}]
+            commit_from_svn_log_entry(svn_start_log, [], keep_author=keep_author, revprops=revprops)
+            print "(Finished source rev #"+str(source_rev)+")"
     else:
         dup_wc = os.path.abspath(dup_wc)
         os.chdir(dup_wc)
         # TODO: Need better resume support. For the time being, expect caller explictly passes in resume revision.
-        svn_rev = options.svn_rev
-        if svn_rev < 1:
+        source_rev = options.svn_rev
+        if source_rev < 1:
             display_error("Invalid arguments\n\nNeed to pass result rev # (-r) when using continue-mode (-c)", False)
 
-    # Load SVN log starting from svn_rev + 1
-    it_log_entries = iter_svn_log_entries(source_url, svn_rev + 1, greatest_rev)
+    # Load SVN log starting from source_rev + 1
+    it_log_entries = iter_svn_log_entries(source_url, source_rev + 1, greatest_rev)
 
     try:
         for log_entry in it_log_entries:
