@@ -532,7 +532,6 @@ def get_rev_map(rev_map, src_rev, prefix):
     """
     Find the equivalent rev # in the target repo for the given rev # from the source repo.
     """
-
     # Find the highest entry less-than-or-equal-to src_rev
     for rev in range(src_rev+1, 1, -1):
         if debug:
@@ -542,9 +541,12 @@ def get_rev_map(rev_map, src_rev, prefix):
     # Else, we fell off the bottom of the rev_map. Ruh-roh...
     display_error("Internal Error: get_rev_map: Unable to find match rev_map entry for src_rev=" + src_rev)
 
-def get_svn_dirlist(svn_url, path_offset, svn_rev = ""):
+def get_svn_dirlist(svn_path, svn_rev = ""):
+    """
+    Get a list of all the child contents (recusive) of the given folder path.
+    """
     args = ["list", "--recursive"]
-    path = svn_url+"/"+path_offset if svn_url else path_offset
+    path = svn_path
     if svn_rev:
         args += ["-r", str(svn_rev)]
         path += "@"+str(svn_rev)
@@ -601,10 +603,10 @@ def replay_svn_copyfrom(source_repos_url, source_url, path_base, path_offset, ta
         run_svn(["copy", "-r", tgt_rev, target_url+"/"+copyfrom_offset+"@"+str(tgt_rev), path_offset])
         # Update the content in this fresh copy to match the final target revision.
         if is_dir:
-            paths_local =  get_svn_dirlist("", path_offset)
-            paths_remote = get_svn_dirlist(source_url, path_offset, svn_rev)
-            print prefix + "paths_local:  " + str(paths_local)
-            print prefix + "paths_remote: " + str(paths_remote)
+            paths_local =  get_svn_dirlist(path_offset)
+            paths_remote = get_svn_dirlist(source_url+"/"+path_offset, svn_rev)
+            print prefix + "\x1b[32m" + "paths_local:  " + str(paths_local) + "\x1b[0m"
+            print prefix + "\x1b[32m" + "paths_remote: " + str(paths_remote) + "\x1b[0m"
             # Update files/folders which exist in remote but not local
             for path in paths_remote:
                 if not path in paths_local:
