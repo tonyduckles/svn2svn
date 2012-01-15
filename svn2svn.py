@@ -116,7 +116,7 @@ def shell_quote(s):
 
 locale_encoding = locale.getpreferredencoding()
 
-def run_svn(args, fail_if_stderr=False, encoding="utf-8"):
+def run_svn(args, fail_if_stderr=False, ignore_retcode_err=False, encoding="utf-8"):
     """
     Run svn cmd in PIPE
     exit if svn cmd failed
@@ -148,7 +148,7 @@ def run_svn(args, fail_if_stderr=False, encoding="utf-8"):
         print "(" + str(round(time2-time1,4)) + " elapsed)"
     if out and runsvn_showout:
         print out
-    if pipe.returncode != 0 or (fail_if_stderr and err.strip()):
+    if (pipe.returncode != 0 and not ignore_retcode_err) or (fail_if_stderr and err.strip()):
         display_error("External program failed (return code %d): %s\n%s"
             % (pipe.returncode, cmd_string, err))
     return out
@@ -543,25 +543,14 @@ def get_rev_map(rev_map, src_rev, prefix):
     display_error("Internal Error: get_rev_map: Unable to find match rev_map entry for src_rev=" + src_rev)
 
 def get_svn_dirlist(svn_url, path_offset, svn_rev = ""):
-    # TODO: Rather than "svn ls" parent folder, instead just introducing an "ignore_error" param into run_svn()?
-    # Get path_offset's parent folder
-    p_path_offset = path_offset[:path_offset.rindex('/')] if '/' in path_offset else ""
-    # Get path_offset's leaf folder-name
-    p_path_sub = path_offset[len(p_path_offset)+1:]
-    #print "get_svn_dirlist: svn_url:"+svn_url+" path_offset:"+path_offset+" p_path_offset:"+p_path_offset+" p_path_sub:"+p_path_sub
     args = ["list", "--recursive"]
+    path = svn_url+"/"+path_offset if svn_url else path_offset
     if svn_rev:
         args += ["-r", str(svn_rev)]
-    args += [(svn_url+"/"+p_path_offset if svn_url else p_path_offset)]
-    p_paths = run_svn(args)
-    p_paths = p_paths.strip("\n").split("\n") if len(p_paths)>1 else []
-    paths= []
-    if p_paths:
-        for path in p_paths:
-            #print "path:"+path+" p_path_sub:"+p_path_sub
-            if path.startswith(p_path_sub):
-                path_orig = path[len(p_path_sub)+1:]
-                if path_orig: paths.append(path_orig)
+        path += "@"+str(svn_rev)
+    args += [path]
+    paths = run_svn(args, False, True)
+    paths = paths.strip("\n").split("\n") if len(paths)>1 else []
     return paths
 
 def replay_svn_copyfrom(source_repos_url, source_url, path_base, path_offset, target_url, svn_rev, \
@@ -612,8 +601,8 @@ def replay_svn_copyfrom(source_repos_url, source_url, path_base, path_offset, ta
         run_svn(["copy", "-r", tgt_rev, target_url+"/"+copyfrom_offset+"@"+str(tgt_rev), path_offset])
         # Update the content in this fresh copy to match the final target revision.
         if is_dir:
-            paths_remote = get_svn_dirlist(source_url, path_offset, svn_rev)
             paths_local =  get_svn_dirlist("", path_offset)
+            paths_remote = get_svn_dirlist(source_url, path_offset, svn_rev)
             print prefix + "paths_local:  " + str(paths_local)
             print prefix + "paths_remote: " + str(paths_remote)
             # Update files/folders which exist in remote but not local
