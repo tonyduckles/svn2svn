@@ -27,7 +27,7 @@ import select
 import calendar
 import traceback
 
-from optparse import OptionParser
+from optparse import OptionParser,OptionGroup
 from subprocess import Popen, PIPE
 from datetime import datetime
 from operator import itemgetter
@@ -529,8 +529,9 @@ def get_rev_map(rev_map, src_rev, prefix):
     """
     Find the equivalent rev # in the target repo for the given rev # from the source repo.
     """
+    print prefix + "\x1b[32m" + ">> get_rev_map("+str(src_rev)+")" + "\x1b[0m"
     # Find the highest entry less-than-or-equal-to src_rev
-    for rev in range(src_rev+1, 1, -1):
+    for rev in range(src_rev, 0, -1):
         if debug:
             print prefix + "\x1b[32m" + ">> get_rev_map: rev="+str(rev)+"  in_rev_map="+str(rev in rev_map) + "\x1b[0m"
         if rev in rev_map:
@@ -815,20 +816,27 @@ def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, tar
     print "(Finished source rev #"+str(source_rev)+")"
 
 def main():
-    usage = "Usage: %prog [-a] [-c] [-r SVN rev] <Source SVN URL> <Target SVN URL>"
+    usage = "Usage: %prog [-a] [-c] [-r SVN rev] source_url target_url"
     parser = OptionParser(usage)
+    parser.add_option("-r", "--revision", type="int", dest="svn_rev", metavar="REV",
+                      help="initial SVN revision to checkout from")
     parser.add_option("-a", "--keep-author", action="store_true", dest="keep_author",
                       help="maintain original Author info from source repo")
     parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
                       help="continue from previous break")
-    parser.add_option("-r", type="int", dest="svn_rev",
-                      help="initial SVN revision to checkout from")
     parser.add_option("-v", "--verbose", action="store_true", dest="verbose",
-                      help="display 'svn status'-like info for each action+changed-path being replayed")
-    parser.add_option("--debug-showcmds", action="store_true", dest="debug_showcmds",
+                      help="show 'svn status'-style messages for each action replayed [default]")
+    parser.add_option("-q", "--quiet", action="store_false", dest="verbose",
+                      help="show only minimal status/progress messages")
+    parser.set_defaults(verbose=True)
+    group = OptionGroup(parser, "Debug Options")
+    group.add_option("--debug", action="store_true", dest="debug_all",
+                     help="enable all debugging options")
+    group.add_option("--debug-showcmds", action="store_true", dest="debug_showcmds",
                       help="display each SVN command being executed")
-    parser.add_option("--debug-debugmsgs", action="store_true", dest="debug_debugmsgs",
+    group.add_option("--debug-debugmsgs", action="store_true", dest="debug_debugmsgs",
                       help="display debug messages")
+    parser.add_option_group(group)
     (options, args) = parser.parse_args()
     if len(args) != 2:
         display_error("incorrect number of arguments\n\nTry: svn2svn.py --help",
@@ -851,13 +859,14 @@ def main():
 
     dup_wc = "_dup_wc"
     rev_map = {}
-    global debug
-    global runsvn_showcmd
-    global svnlog_verbose
+    global debug, runsvn_showcmd, svnlog_verbose
 
     if options.debug_debugmsgs:
         debug = True
     if options.debug_showcmds:
+        runsvn_showcmd = True
+    if options.debug_all:
+        debug = True
         runsvn_showcmd = True
     if options.verbose:
         svnlog_verbose = True
