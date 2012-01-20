@@ -241,11 +241,19 @@ def parse_svn_status_xml(xml_string, base_dir=None):
             path = path[len(base_dir):].lstrip('/\\')
         d['path'] = path
         wc_status = entry.find('wc-status')
-        if wc_status.get('item') == 'external':
+        d['wc_status'] = {
+            'props':    wc_status.get('props'),
+            'item':     wc_status.get('item'),
+            'copied':   wc_status.get('copied'),
+            'revision': wc_status.get('revision'),
+        }
+        if d['wc_status']['item'] == 'external':
             d['type'] = 'external'
-        elif wc_status.get('item') == 'deleted':
+        elif d['wc_status']['item'] == 'deleted':
             d['type'] = 'deleted'
-        elif wc_status.get('revision') is not None:
+        elif d['wc_status']['item'] == 'added':
+            d['type'] = 'added'
+        elif (wc_status.get('revision') is not None) or (d['wc_status']['item'] == 'normal'):
             d['type'] = 'normal'
         else:
             d['type'] = 'unversioned'
@@ -395,19 +403,21 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False, revprops=[])
     print "(Committing source rev #"+str(entry['revision'])+"...)"
     run_svn(options)
 
-def in_svn(p):
+def in_svn(p, in_repo=False):
     """
     Check if a given file/folder is being tracked by Subversion.
     Prior to SVN 1.6, we could "cheat" and look for the existence of ".svn" directories.
     With SVN 1.7 and beyond, WC-NG means only a single top-level ".svn" at the root of the working-copy.
     Use "svn status" to check the status of the file/folder.
     """
-    # TODO: Is there a better way to do this?
     entries = get_svn_status(p)
     if not entries:
       return False
     d = entries[0]
-    return (d['type'] == 'normal')
+    # If caller requires this path to be in the SVN repo, prevent returning True for locally-added paths.
+    if in_repo and (d['type'] == 'added' or d['wc_status']['revision'] is None):
+        return False
+    return True if (d['type'] == 'normal' or d['type'] == 'added') else False
 
 def find_svn_ancestors(source_repos_url, source_url, path_offset, source_rev, \
                        copyfrom_path, copyfrom_rev, prefix = ""):
