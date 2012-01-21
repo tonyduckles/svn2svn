@@ -203,6 +203,98 @@ svn switch -q $TRUNK
 svn merge -q $BRANCH
 svn_commit "Test 11: Rename Module/ProjectC -> Module/ProjectE"
 
+# Test #12: Verify renames
+BRANCH="$REPOURL/branches/test12"
+svn copy -q -m "Create branch" $TRUNK $BRANCH
+svn switch -q $BRANCH
+show_last_commit
+echo "Module/ProjectE/FileE1.txt (Test 12)" >> $WC/Module/ProjectE/FileE1.txt
+echo "Module/ProjectE/FileE2.txt (Test 12)" >> $WC/Module/ProjectE/FileE2.txt
+svn_commit "Test 12: Verify Module/ProjectE/FileE*.txt"
+svn switch -q $TRUNK
+svn merge -q $BRANCH
+svn_commit "Test 12: Verify Module/ProjectE/FileE*.txt"
+
+# Test #13: Replaces and add's inside a parent renamed folder.
+BRANCH="$REPOURL/branches/test13"
+svn copy -q -m "Create branch" $TRUNK $BRANCH
+svn switch -q $BRANCH
+show_last_commit
+svn copy -q Module/ProjectA Module/ProjectB
+echo "Module/ProjectB/FileA1.txt (Test 13-1)" >> $WC/Module/ProjectB/FileA1.txt
+echo "Module/ProjectB/FileA2.txt (Test 13-1)" >> $WC/Module/ProjectB/FileA2.txt
+svn_commit "Test 13: Copy Module/ProjectA -> Module/ProjectB"
+svn mv -q Module/ProjectB/FileA1.txt Module/ProjectB/FileB1.txt
+echo "Module/ProjectB/FileB1.txt (Test 13-2)" >> $WC/Module/ProjectB/FileB1.txt
+svn mv -q Module/ProjectB/FileA2.txt Module/ProjectB/FileB2.txt
+echo "Module/ProjectB/FileB2.txt (Test 13-2)" >> $WC/Module/ProjectB/FileB2.txt
+svn_commit "Test 13: Rename Module/ProjectB/FileA*.txt -> FileB*.txt"
+svn copy -q Module/ProjectB/FileB2.txt Module/ProjectB/FileB3.txt
+echo "Module/ProjectB/FileB3.txt (Test 13-3)" >> $WC/Module/ProjectB/FileB3.txt
+svn rm -q Module/ProjectB/FileB1.txt
+echo "Module/ProjectB/FileB1.txt (Test 13-3 - Replaced)" >> $WC/Module/ProjectB/FileB1.txt
+svn add -q Module/ProjectB/FileB1.txt
+svn_commit "Test 13: Edits to Module/ProjectB/FileB*.txt"
+svn switch -q $TRUNK
+svn merge -q $BRANCH
+svn_commit "Test 13: Create Module/ProjectB from Module/ProjectA"
+
+# Test #14: Verify renames
+BRANCH="$REPOURL/branches/test14"
+svn copy -q -m "Create branch" $TRUNK $BRANCH
+svn switch -q $BRANCH
+show_last_commit
+echo "Module/ProjectB/FileB1.txt (Test 14)" >> $WC/Module/ProjectB/FileB1.txt
+echo "Module/ProjectB/FileB2.txt (Test 14)" >> $WC/Module/ProjectB/FileB2.txt
+echo "Module/ProjectB/FileB3.txt (Test 14)" >> $WC/Module/ProjectB/FileB3.txt
+svn_commit "Test 14: Verify Module/ProjectB/FileB*.txt"
+svn switch -q $TRUNK
+svn merge -q $BRANCH
+svn_commit "Test 14: Verify Module/ProjectB/FileB*.txt"
+
+# Test #15: Replace copy-from
+BRANCH="$REPOURL/branches/test15"
+svn copy -q -m "Create branch" $TRUNK $BRANCH
+svn switch -q $BRANCH
+show_last_commit
+svn rm -q Module/ProjectB/FileB2.txt
+svn copy -q -r 22 $TRUNK/Module/ProjectC/FileC1.txt@22 Module/ProjectB/FileB2.txt
+echo "Module/ProjectB/FileB2.txt (Test 15 - Replaced)" >> $WC/Module/ProjectB/FileB2.txt
+svn_commit "Test 15: Replace Module/ProjectB/FileB2.txt from earlier Module/ProjectC/FileC1.txt"
+svn switch -q $TRUNK
+svn merge -q $BRANCH
+svn_commit "Test 15: Replace Module/ProjectB/FileB2.txt from earlier Module/ProjectC/FileC1.txt"
+
+# Test #16: Verify replace
+BRANCH="$REPOURL/branches/test16"
+svn copy -q -m "Create branch" $TRUNK $BRANCH
+svn switch -q $BRANCH
+show_last_commit
+echo "Module/ProjectB/FileB2.txt (Test 16)" >> $WC/Module/ProjectB/FileB2.txt
+svn_commit "Test 16: Verify Module/ProjectB/FileB2.txt"
+svn switch -q $TRUNK
+svn merge -q $BRANCH
+svn_commit "Test 16: Verify Module/ProjectB/FileB2.txt"
+
+# Test #17: Copy-from replaces and add's inside top-level initial-add folder
+BRANCH="$REPOURL/branches/test17"
+svn copy -q -m "Create branch" $TRUNK $BRANCH
+svn switch -q $BRANCH
+show_last_commit
+svn mkdir -q Module2
+svn copy -q Module/ProjectB Module2/ProjectB
+echo "Module2/ProjectB/FileB1.txt (Test 17-1)" >> $WC/Module2/ProjectB/FileB1.txt
+echo "Module2/ProjectB/FileB2.txt (Test 17-1)" >> $WC/Module2/ProjectB/FileB2.txt
+echo "Module2/ProjectB/FileB3.txt (Test 17-1)" >> $WC/Module2/ProjectB/FileB3.txt
+svn_commit "Test 17: Copy Module/ProjectB -> Module2/ProjectB"
+svn rm -q Module2/ProjectB/FileB1.txt
+svn copy -q -r 22 $TRUNK/Module/ProjectC/FileC2.txt@22 Module2/ProjectB/FileB1.txt
+echo "Module2/ProjectB/FileB1.txt (Test 17-2)" >> $WC/Module2/ProjectB/FileB1.txt
+svn_commit "Test 17: Replace Module2/ProjectB/FileB1.txt from earlier Module/ProjectC/FileC2.txt"
+svn switch -q $TRUNK
+svn merge -q $BRANCH
+svn_commit "Test 17: Create Module2/ProjectB from Module/ProjectB"
+
 # Clean-up
 echo "Cleaning-up..."
 rm -rf $WC
