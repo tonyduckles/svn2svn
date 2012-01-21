@@ -4,11 +4,12 @@
 
 PWD=$(pwd)
 WCREF="$PWD/_wc_ref"
-WCDUP="$PWD/_dup_wc"
+WCDUP="$PWD/_wc_target"
 found_diff=0
 
 # Create a working-copy for the reference repo
-# Note: We assume that the replay working-copy ("_dup_wc") still exists from make-replay-repo.sh
+# Note: We assume that the replay working-copy ("_wc_target") still exists from make-replay-repo.sh
+#svn co -q file://$PWD/_repo_ref $WCREF
 svn co -q file://$PWD/_repo_ref/trunk $WCREF
 
 # Check if the final list of files is the same
