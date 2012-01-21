@@ -454,7 +454,7 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
         log_entry = get_first_svn_log_entry(svn_repos_url + working_path+"@"+str(working_rev), 1, str(working_rev), True)
         if not log_entry:
             if debug:
-                print prefix+"\x1b[33m" + ">> find_svn_ancestors: Done: no log_entry " + "\x1b[0m"
+                print prefix+"\x1b[33m" + ">> find_svn_ancestors: Done: no log_entry" + "\x1b[0m"
             done = True
             break
         # If we found a copy-from case which matches our base_path, we're done.
@@ -479,53 +479,47 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
             continue
         # Reverse-sort any matches, so that we start with the most-granular (deepest in the tree) path.
         changed_paths = sorted(changed_paths_temp, key=itemgetter('path'), reverse=True)
-        # Find the action for our working_path in this revision
-        v = changed_paths[0]
-        d = v['data']
-        path = d['path']
-        # Check action-type for this file
-        action = d['action']
-        if action not in 'MARD':
-            display_error("In SVN rev. %d: action '%s' not supported. \
-                           Please report a bug!" % (log_entry['revision'], action))
-        if debug:
-            debug_desc = "> " + action + " " + path
-            if d['copyfrom_path']:
-                debug_desc += " (from " + d['copyfrom_path']+"@"+str(d['copyfrom_revision']) + ")"
-            print prefix+"\x1b[33m" + debug_desc + "\x1b[0m"
-
-        if action == 'R':
-            # If file/folder was replaced, it has no ancestor
-            ancestors_temp = []
+        # Find the action for our working_path in this revision. Use a loop to check in reverse order,
+        # so that if the target file/folder is "M" but has a parent folder with an "A" copy-from.
+        for v in changed_paths:
+            d = v['data']
+            path = d['path']
+            # Check action-type for this file
+            action = d['action']
+            if action not in 'MARD':
+                display_error("In SVN rev. %d: action '%s' not supported. \
+                               Please report a bug!" % (log_entry['revision'], action))
             if debug:
-                print prefix+"\x1b[33m" + ">> find_svn_ancestors: Done: replaced" + "\x1b[0m"
-            done = True
-            break
-        if action == 'D':
-            # If file/folder was deleted, it has no ancestor
-            ancestors_temp = []
-            if debug:
-                print prefix+"\x1b[33m" + ">> find_svn_ancestors: Done: deleted" + "\x1b[0m"
-            done = True
-            break
-        if action == 'A':
-            # If file/folder was added but not a copy, it has no ancestor
-            if not d['copyfrom_path']:
+                debug_desc = "> " + action + " " + path
+                if d['copyfrom_path']:
+                    debug_desc += " (from " + d['copyfrom_path']+"@"+str(d['copyfrom_revision']) + ")"
+                print prefix+"\x1b[33m" + debug_desc + "\x1b[0m"
+            if action == 'D':
+                # If file/folder was deleted, it has no ancestor
                 ancestors_temp = []
                 if debug:
-                    print prefix+"\x1b[33m" + ">> find_svn_ancestors: Done: no copyfrom_path" + "\x1b[0m"
+                    print prefix+"\x1b[33m" + ">> find_svn_ancestors: Done: deleted" + "\x1b[0m"
                 done = True
                 break
-            # Else, file/folder was added and is a copy, so add an entry to our ancestors list
-            # and keep checking for ancestors
-            if debug:
-                print prefix+"\x1b[33m" + ">> find_svn_ancestors: Found copy-from: " + \
-                      path + " --> " + d['copyfrom_path']+"@"+str(d['copyfrom_revision']) + "\x1b[0m"
-            ancestors_temp.append({'path': path, 'revision': log_entry['revision'],
-                                   'copyfrom_path': d['copyfrom_path'], 'copyfrom_rev': d['copyfrom_revision']})
-            working_path = working_path.replace(d['path'], d['copyfrom_path'])
-            working_rev =  d['copyfrom_revision']
-            # Else, follow the copy and keep on searching
+            if action in 'RA':
+                # If file/folder was added/replaced but not a copy, it has no ancestor
+                if not d['copyfrom_path']:
+                    ancestors_temp = []
+                    if debug:
+                        print prefix+"\x1b[33m" + ">> find_svn_ancestors: Done: "+("Added" if action == "A" else "Replaced")+" with no copyfrom_path" + "\x1b[0m"
+                    done = True
+                    break
+                # Else, file/folder was added/replaced and is a copy, so add an entry to our ancestors list
+                # and keep checking for ancestors
+                if debug:
+                    print prefix+"\x1b[33m" + ">> find_svn_ancestors: Found copy-from ("+action+"): " + \
+                          path + " --> " + d['copyfrom_path']+"@"+str(d['copyfrom_revision']) + "\x1b[0m"
+                ancestors_temp.append({'path': path, 'revision': log_entry['revision'],
+                                       'copyfrom_path': d['copyfrom_path'], 'copyfrom_rev': d['copyfrom_revision']})
+                working_path = working_path.replace(d['path'], d['copyfrom_path'])
+                working_rev =  d['copyfrom_revision']
+                # Follow the copy and keep on searching
+                break
     ancestors = []
     if ancestors_temp:
         ancestors.append({'path': base_path+"/"+source_path, 'revision': source_rev})
@@ -580,18 +574,18 @@ def get_svn_dirlist(svn_path, svn_rev = ""):
     paths = paths.strip("\n").split("\n") if len(paths)>1 else []
     return paths
 
-def _add_export_todo(export_todo, path_offset):
+def _add_export_path(export_paths, path_offset):
     found = False
-    for p in export_todo:
+    for p in export_paths:
         if path_offset.startswith(p):
             found = True
             break
     if not found:
-        export_todo.append(path_offset)
-    return export_todo
+        export_paths.append(path_offset)
+    return export_paths
 
 def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev, \
-               parent_copyfrom_path="", parent_copyfrom_rev="", export_todo={}, \
+               parent_copyfrom_path="", parent_copyfrom_rev="", export_paths={}, \
                rev_map={}, is_dir = False, prefix = ""):
     """
     Given the add'd source path, replay the "svn add/copy" commands to correctly
@@ -615,6 +609,9 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
       e.g. 'projectA/file1.txt'. path = source_repos_url + source_base + path_offset.
     'target_url' is the full URL to the target path in the target repository.
     'source_rev' is the revision ("svn log") that we're processing from the source repo.
+    'parent_copyfrom_path' and 'parent_copyfrom_rev' is the copy-from path of the parent
+      directory, when being called recursively by do_svn_add_dir().
+    'export_paths' is the list of path_offset's that we've deferred running "svn export" on.
     'rev_map' is the running mapping-table dictionary for source-repo rev #'s
       to the equivalent target-repo rev #'s.
     'is_dir' is whether path_offset is a directory (rather than a file).
@@ -626,7 +623,6 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
     # Check if the given path has ancestors which chain back to the current source_base
     found_ancestor = False
     ancestors = find_svn_ancestors(source_repos_url, source_base, path_offset, source_rev, prefix+"  ")
-    # TODO: Need to handle replace cases. find_svn_ancestors() should have an output param.
     # ancestors[n] is the original (pre-branch-copy) trunk path.
     # ancestors[n-1] is the first commit on the new branch.
     copyfrom_path = ancestors[len(ancestors)-1]['path']     if ancestors else ""
@@ -668,22 +664,20 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
             else:
                 # Copy this path from the equivalent path+rev in the target repo, to create the
                 # equivalent history.
+                if parent_copyfrom_path and svnlog_verbose:
+                    # If we have a parent copy-from path, we mis-match that so display a status
+                    # message describing the action we're mimic'ing. If path_in_svn, then this
+                    # is logically a "replace" rather than an "add".
+                    print " "+('R' if path_in_svn else 'A')+" "+source_base+"/"+path_offset+" (from "+ancestors[1]['path']+"@"+str(copyfrom_rev)+")"
                 if path_in_svn:
-                    # If local file is already under version-control, revert it before we run the "svn copy".
-                    # TODO: Is this right? Do we need to do a revert and/or hard-delete?
+                    # If local file is already under version-control, then this is a replace.
                     if debug:
                         print prefix + "\x1b[32m" + ">> do_svn_add: pre-copy: local path already exists: " + path_offset + "\x1b[0m"
-                    run_svn(["revert", path_offset])
-                    if os.path.exists(path_offset):
-                        # If local file still exists after "svn revert", then hard-delete it.
-                        shutil.rmtree(path_offset) if is_dir else os.remove(path_offset)
+                    run_svn(["remove", "--force", path_offset])
                 run_svn(["copy", "-r", tgt_rev, target_url+"/"+copyfrom_offset+"@"+str(tgt_rev), path_offset])
-                if not is_dir:
-                    # For files, export the final version of this file from the source repo, to make
-                    # sure we're up-to-date.
-                    export_todo = _add_export_todo(export_todo, path_offset)
-                    #run_svn(["export", "--force", "-r", str(copyfrom_rev),
-                    #         source_repos_url + copyfrom_path+"@"+str(copyfrom_rev), path_offset])
+                # Export the final version of this file/folder from the source repo, to make
+                # sure we're up-to-date.
+                export_paths = _add_export_path(export_paths, path_offset)
         else:
             print prefix + "\x1b[32m" + ">> do_svn_add: Skipped 'svn copy': " + path_offset + "\x1b[0m"
     else:
@@ -698,10 +692,10 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
         if not in_svn(path_offset):
             if is_dir:
                 # Export the final verison of all files in this folder.
-                export_todo = _add_export_todo(export_todo, path_offset)
+                export_paths = _add_export_path(export_paths, path_offset)
             else:
                 # Export the final verison of this file. We *need* to do this before running
-                # the "svn add", even if we end-up re-exporting this file again via export_todo.
+                # the "svn add", even if we end-up re-exporting this file again via export_paths.
                 run_svn(["export", "--force", "-r", str(source_rev),
                          source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
             # If not already under version-control, then "svn add" this file/folder.
@@ -711,10 +705,10 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
         # For any folders that we process, process any child contents, so that we correctly
         # replay copies/replaces/etc.
         do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target_url,
-                       copyfrom_path, copyfrom_rev, export_todo, rev_map, prefix+"  ")
+                       copyfrom_path, copyfrom_rev, export_paths, rev_map, prefix+"  ")
 
 def do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target_url, \
-                   parent_copyfrom_path, parent_copyfrom_rev, export_todo, rev_map, prefix=""):
+                   parent_copyfrom_path, parent_copyfrom_rev, export_paths, rev_map, prefix=""):
     source_base = source_url[len(source_repos_url):]
     # Get the directory contents, to compare between the local WC (target_url) vs. the remote repo (source_url)
     # TODO: paths_local won't include add'd paths because "svn ls" lists the contents of the
@@ -724,30 +718,13 @@ def do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target
     if debug:
         print prefix + "\x1b[32m" + ">> do_svn_add_dir: paths_local:  " + str(paths_local) + "\x1b[0m"
         print prefix + "\x1b[32m" + ">> do_svn_add_dir: paths_remote: " + str(paths_remote) + "\x1b[0m"
-    # TODO: Is this right?
-    # * What if one of the files was replaced?
-    # * What if do_svn_add() ends-up copy'ing a sub-folder, which ends-up
-    #   introducing files which were originally missing in paths_local? Should this
-    #   be breadth-first (handle immediate contents, and call recursively for folders)?
-    # * What about other cases where the child file/folder history doesn't chain back
-    #   to exactly match the chain of this (parent) folder?
     # Update files/folders which exist in remote but not local
     for path in paths_remote:
         path_is_dir = True if path[-1] == "/" else False
         working_path = path_offset+"/"+(path.rstrip('/') if path_is_dir else path)
         do_svn_add(source_repos_url, source_url, working_path, target_url, source_rev,
-                   parent_copyfrom_path, parent_copyfrom_rev, export_todo,
+                   parent_copyfrom_path, parent_copyfrom_rev, export_paths,
                    rev_map, path_is_dir, prefix+"  ")
-        #if not path in paths_local:
-        #    path_is_dir = True if path[-1] == "/" else False
-        #    # Update this file, using do_svn_add to handle any copy's
-        #    do_svn_add(source_repos_url, source_url, path_offset+"/"+path,
-        #               target_url, source_rev, rev_map, path_is_dir, prefix+"  ")
-        #else:
-        #    path_is_dir = True if path[-1] == "/" else False
-        #    if not path_is_dir:
-        #        run_svn(["export", "--force", "-r", str(source_rev),
-        #                 source_repos_url+source_base+"/"+path_offset+"/"+path+"@"+str(source_rev), path_offset+"/"+path])
     # Remove files/folders which exist in local but not remote
     for path in paths_local:
         if not path in paths_remote:
@@ -758,7 +735,7 @@ def do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target
             #       where we only delete all files from folder but leave orphaned folder around.
 
 def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
-                          rev_map, removed_paths = [], commit_paths = [], prefix = ""):
+                          rev_map, commit_paths = [], prefix = ""):
     """
     Process SVN changes from the given log entry.
     Returns array of all the paths in the working-copy that were changed,
@@ -770,11 +747,11 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
     'target_url' is the full URL to the target path in the target repository.
     'rev_map' is the running mapping-table dictionary for source-repo rev #'s
       to the equivalent target-repo rev #'s.
-    'removed_paths' is the working list of deferred deletions.
     'commit_paths' is the working list of specific paths which changes to pass
       to the final "svn commit".
     """
-    export_todo = []
+    removed_paths = []
+    export_paths = []
     # Get the relative offset of source_url based on source_repos_url
     # e.g. '/branches/bug123'
     source_base = source_url[len(source_repos_url):]
@@ -800,6 +777,13 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
         if action not in 'MARD':
             display_error("In SVN rev. %d: action '%s' not supported. \
                            Please report a bug!" % (source_rev, action))
+        if svnlog_verbose and (action not in 'D'):
+            # (Note: Skip displaying action message for 'D' here since we'll display that
+            #  message when we process the deferred delete actions at the end.)
+            msg = " " + action + " " + d['path']
+            if d['copyfrom_path']:
+                msg += " (from " + d['copyfrom_path']+"@"+str(d['copyfrom_revision']) + ")"
+            print prefix + msg
 
         # Try to be efficient and keep track of an explicit list of paths in the
         # working copy that changed. If we commit from the root of the working copy,
@@ -811,11 +795,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
 
         # Special-handling for replace's
         if action == 'R':
-            if svnlog_verbose:
-                msg = " " + action + " " + d['path']
-                if d['copyfrom_path']:
-                    msg += " (from " + d['copyfrom_path']+"@"+str(d['copyfrom_revision']) + ")"
-                print prefix + msg
             # If file was "replaced" (deleted then re-added, all in same revision),
             # then we need to run the "svn rm" first, then change action='A'. This
             # lets the normal code below handle re-"svn add"'ing the files. This
@@ -826,17 +805,10 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
         # Handle all the various action-types
         # (Handle "add" first, for "svn copy/move" support)
         if action == 'A':
-            if svnlog_verbose:
-                msg = " " + action + " " + d['path']
-                if d['copyfrom_path']:
-                    msg += " (from " + d['copyfrom_path']+"@"+str(d['copyfrom_revision']) + ")"
-                print prefix + msg
             # If we have any queued deletions for this same path, remove those if we're re-adding this path.
             if path_offset in removed_paths:
                 removed_paths.remove(path_offset)
             # Determine where to export from.
-            #copyfrom_path = path
-            #copyfrom_rev =  source_rev
             svn_copy = False
             path_is_dir = True if d['kind'] == 'dir' else False
             # Handle cases where this "add" was a copy from another URL in the source repos
@@ -844,20 +816,19 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
                 copyfrom_path = d['copyfrom_path']
                 copyfrom_rev =  d['copyfrom_revision']
                 do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev,
-                           "", "", export_todo, rev_map, path_is_dir, prefix+"  ")
+                           "", "", export_paths, rev_map, path_is_dir, prefix+"  ")
             # Else just "svn export" the files from the source repo and "svn add" them.
             else:
                 # Create (parent) directory if needed
                 p_path = path_offset if path_is_dir else os.path.dirname(path_offset).strip() or '.'
                 if not os.path.exists(p_path):
                     run_svn(["mkdir", p_path])
-                    #os.makedirs(p_path)
                 # Export the entire added tree.
                 if path_is_dir:
-                    export_todo = _add_export_todo(export_todo, path_offset)
+                    export_paths = _add_export_path(export_paths, path_offset)
                 else:
                     # Export the final verison of this file. We *need* to do this before running
-                    # the "svn add", even if we end-up re-exporting this file again via export_todo.
+                    # the "svn add", even if we end-up re-exporting this file again via export_paths.
                     run_svn(["export", "--force", "-r", str(source_rev),
                              source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
                 # TODO: Do we need the in_svn check here?
@@ -872,8 +843,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
                 removed_paths.append(path_offset)
 
         elif action == 'M':
-            if svnlog_verbose:
-                print prefix + " " + action + " " + d['path']
             # TODO: Is "svn merge -c" correct here? Should this just be an "svn export" plus
             #       proplist updating?
             out = run_svn(["merge", "-c", str(source_rev), "--non-recursive",
@@ -883,9 +852,16 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
         else:
             display_error("Internal Error: process_svn_log_entry: Unhandled 'action' value: '" + action + "'")
 
+    # Process any deferred removed actions
+    if removed_paths:
+        path_base = source_url[len(source_repos_url):]
+        for path_offset in removed_paths:
+            if svnlog_verbose:
+                print " D " + path_base+"/"+path_offset
+            run_svn(["remove", "--force", path_offset])
     # Export the final version of all add'd paths from source_url
-    if export_todo:
-        for path_offset in export_todo:
+    if export_paths:
+        for path_offset in export_paths:
             run_svn(["export", "--force", "-r", str(source_rev),
                      source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
 
@@ -909,19 +885,9 @@ def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, tar
     source_rev = log_entry['revision']
 
     # Process all the paths in this log entry
-    removed_paths = []
     commit_paths = []
     process_svn_log_entry(log_entry, source_repos_url, source_url, target_url,
-                          rev_map, removed_paths, commit_paths)
-    # Process any deferred removed actions
-    # TODO: Move this code back to process_svn_log_entry(), now that we're not calling process_svn_log_entry() recursively
-    if removed_paths:
-        path_base = source_url[len(source_repos_url):]
-        for path_offset in removed_paths:
-            if svnlog_verbose:
-                print " D " + path_base+"/"+path_offset
-            run_svn(["remove", "--force", path_offset])
-
+                          rev_map, commit_paths)
     # If we had too many individual paths to commit, wipe the list and just commit at
     # the root of the working copy.
     if len (commit_paths) > 99:
