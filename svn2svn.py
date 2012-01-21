@@ -976,7 +976,7 @@ def main():
     # Get the UUID for the source repos
     source_repos_uuid = svn_info['repos_uuid']
 
-    dup_wc = "_dup_wc"
+    wc_target = "_wc_target"
     rev_map = {}
     global debug, runsvn_showcmd, svnlog_verbose
 
@@ -992,7 +992,7 @@ def main():
 
     # if old working copy does not exist, disable continue mode
     # TODO: Better continue support. Maybe include source repo's rev # in target commit info?
-    if not os.path.exists(dup_wc):
+    if not os.path.exists(wc_target):
         options.cont_from_break = False
 
     if not options.cont_from_break:
@@ -1024,11 +1024,11 @@ def main():
         source_start_rev = svn_start_log['revision']
 
         # Check out a working copy of target_url
-        dup_wc = os.path.abspath(dup_wc)
-        if os.path.exists(dup_wc):
-            shutil.rmtree(dup_wc)
-        svn_checkout(target_url, dup_wc)
-        os.chdir(dup_wc)
+        wc_target = os.path.abspath(wc_target)
+        if os.path.exists(wc_target):
+            shutil.rmtree(wc_target)
+        svn_checkout(target_url, wc_target)
+        os.chdir(wc_target)
 
         # For the initial commit to the target URL, export all the contents from
         # the source URL at the start-revision.
@@ -1056,8 +1056,8 @@ def main():
             commit_from_svn_log_entry(svn_start_log, [], keep_author=keep_author, revprops=revprops)
             print "(Finished source rev #"+str(source_start_rev)+")"
     else:
-        dup_wc = os.path.abspath(dup_wc)
-        os.chdir(dup_wc)
+        wc_target = os.path.abspath(wc_target)
+        os.chdir(wc_target)
         # TODO: Need better resume support. For the time being, expect caller explictly passes in resume revision.
         source_start_rev = options.svn_rev
         if source_start_rev < 1:
@@ -1072,7 +1072,7 @@ def main():
             pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url,
                          target_url, rev_map, keep_author)
             # Update our target working-copy, to ensure everything says it's at the new HEAD revision
-            run_svn(["up", dup_wc])
+            run_svn(["up"])
             # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
             dup_info = get_svn_info(target_url)
             dup_rev = dup_info['revision']
