@@ -1,39 +1,28 @@
-# -*- coding: utf-8 -*-
-
-"""User interface functions."""
+""" User interface functions """
 
 import os
 import sys
 
-try:
-    # First try to import the Mercurial implementation.
-    import mercurial.ui
-    if getattr(mercurial.ui.ui(), 'termwidth', False):
-        termwidth = mercurial.ui.ui().termwidth 
-    else:
-        from mercurial.util import termwidth
-except ImportError:
-    # Fallback to local copy of Mercurial's implementation.
-    def termwidth():
-        if 'COLUMNS' in os.environ:
+def termwidth():
+    if 'COLUMNS' in os.environ:
+        try:
+            return int(os.environ['COLUMNS'])
+        except ValueError:
+            pass
+    try:
+        import termios, array, fcntl
+        for dev in (sys.stdout, sys.stdin):
             try:
-                return int(os.environ['COLUMNS'])
+                fd = dev.fileno()
+                if not os.isatty(fd):
+                    continue
+                arri = fcntl.ioctl(fd, termios.TIOCGWINSZ, '\0' * 8)
+                return array.array('h', arri)[1]
             except ValueError:
                 pass
-        try:
-            import termios, array, fcntl
-            for dev in (sys.stdout, sys.stdin):
-                try:
-                    fd = dev.fileno()
-                    if not os.isatty(fd):
-                        continue
-                    arri = fcntl.ioctl(fd, termios.TIOCGWINSZ, '\0' * 8)
-                    return array.array('h', arri)[1]
-                except ValueError:
-                    pass
-        except ImportError:
-            pass
-        return 80
+    except ImportError:
+        pass
+    return 80
 
 
 # Log levels
@@ -45,6 +34,7 @@ DEBUG = 30
 
 # Configuration
 _level = DEFAULT
+_debug_showcmd = False
 
 
 def status(msg, *args, **kwargs):
@@ -87,5 +77,6 @@ def status(msg, *args, **kwargs):
 
 def update_config(options):
     """Update UI configuration."""
-    global _level
+    global _level,_debug_showcmd
     _level = options.verbosity
+    _debug_showcmd = options.showcmd

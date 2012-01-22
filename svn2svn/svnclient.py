@@ -1,7 +1,8 @@
+""" SVN client functions """
 
-from hgsvn import ui
-from hgsvn.common import (run_svn, once_or_more)
-from hgsvn.errors import EmptySVNLog
+from svn2svn import ui
+from svn2svn.shell import run_svn
+from svn2svn.errors import EmptySVNLog
 
 import os
 import time
@@ -19,11 +20,10 @@ except ImportError:
         except ImportError:
             from elementtree import ElementTree as ET
 
-
-svn_log_args = ['log', '--xml', '-v']
+svn_log_args = ['log', '--xml']
 svn_info_args = ['info', '--xml']
 svn_checkout_args = ['checkout', '-q']
-svn_status_args = ['status', '--xml', '--ignore-externals']
+svn_status_args = ['status', '--xml', '-v', '--ignore-externals']
 
 _identity_table = "".join(map(chr, range(256)))
 _forbidden_xml_chars = "".join(
@@ -61,8 +61,10 @@ def parse_svn_info_xml(xml_string):
     tree = ET.fromstring(xml_string)
     entry = tree.find('.//entry')
     d['url'] = entry.find('url').text
+    d['kind'] = entry.get('kind')
     d['revision'] = int(entry.get('revision'))
     d['repos_url'] = tree.find('.//repository/root').text
+    d['repos_uuid'] = tree.find('.//repository/uuid').text
     d['last_changed_rev'] = int(tree.find('.//commit').get('revision'))
     author_element = tree.find('.//commit/author')
     if author_element is not None:
@@ -90,24 +92,31 @@ def parse_svn_log_xml(xml_string):
         author = entry.find('author')
         date = entry.find('date')
         msg = entry.find('msg')
-        # Issue 64 - modified to prevent crashes on svn log entries with "No author"
         d['author'] = author is not None and author.text or "No author"
         if date is not None:
             d['date'] = svn_date_to_timestamp(date.text)
         else:
             d['date'] = None
-        d['message'] = msg is not None and msg.text or ""
-        paths = d['changed_paths'] = []
-        for path in entry.findall('.//path'):
+        d['message'] = msg is not None and msg.text.replace('\r\n', '\n').replace('\n\r', '\n').replace('\r', '\n') or ""
+        paths = []
+        for path in entry.findall('.//paths/path'):
             copyfrom_rev = path.get('copyfrom-rev')
             if copyfrom_rev:
                 copyfrom_rev = int(copyfrom_rev)
             paths.append({
                 'path': path.text,
+                'kind': path.get('kind'),
                 'action': path.get('action'),
                 'copyfrom_path': path.get('copyfrom-path'),
                 'copyfrom_revision': copyfrom_rev,
             })
+        # Sort paths (i.e. into hierarchical order), so that process_svn_log_entry()
+        # can process actions in depth-first order.
+        d['changed_paths'] = sorted(paths, key=itemgetter('path'))
+        revprops = []
+        for prop in entry.findall('.//revprops/property'):
+            revprops.append({ 'name': prop.get('name'), 'value': prop.text })
+        d['revprops'] = revprops
         l.append(d)
     return l
 
@@ -132,12 +141,18 @@ def parse_svn_status_xml(xml_string, base_dir=None, ignore_externals=False):
         if wc_status.get('item') == 'external':
             if ignore_externals:
                 continue
+        status =   wc_status.get('item')
+        revision = wc_status.get('revision')
+        if status == 'external':
             d['type'] = 'external'
-        elif wc_status.get('revision') is not None:
+        elif revision is not None:
             d['type'] = 'normal'
         else:
             d['type'] = 'unversioned'
-        d['status'] = wc_status.get('item')
+        d['status'] =   status
+        d['revision'] = revision
+        d['props'] =    wc_status.get('props')
+        d['copied'] =   wc_status.get('copied')
         l.append(d)
     return l
 
@@ -148,11 +163,10 @@ def get_svn_info(svn_url_or_wc, rev_number=None):
     Returns a dict as created by parse_svn_info_xml().
     """
     if rev_number is not None:
-        args = ['-r', rev_number]
+        args = ["-r", rev_number, svn_url_or_wc+"@"+str(rev_number)]
     else:
-        args = []
-    xml_string = run_svn(svn_info_args + args + [svn_url_or_wc],
-        fail_if_stderr=True)
+        args = [svn_url_or_wc]
+    xml_string = run_svn(svn_info_args + args, fail_if_stderr=True)
     return parse_svn_info_xml(xml_string)
 
 def svn_checkout(svn_url, checkout_dir, rev_number=None):
@@ -165,19 +179,27 @@ def svn_checkout(svn_url, checkout_dir, rev_number=None):
     args += [svn_url, checkout_dir]
     return run_svn(svn_checkout_args + args)
 
-def run_svn_log(svn_url, rev_start, rev_end, limit, stop_on_copy=False):
+def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, get_changed_paths=True, get_revprops=False):
     """
     Fetch up to 'limit' SVN log entries between the given revisions.
     """
+    args = []
     if stop_on_copy:
-        args = ['--stop-on-copy']
-    else:
-        args = []
-    args += ['-r', '%s:%s' % (rev_start, rev_end), '--limit', limit, svn_url]
+        args += ['--stop-on-copy']
+    if get_changed_paths:
+        args += ['-v']
+    if get_revprops:
+        args += ['--with-all-revprops']
+    url = str(svn_url_or_wc)
+    if rev_start != 'HEAD' and rev_end != 'HEAD':
+        args += ['-r', '%s:%s' % (rev_start, rev_end)]
+        if not "@" in svn_url_or_wc:
+            url = "%s@%s" % (svn_url_or_wc, str(max(rev_start, rev_end)))
+    args += ['--limit', str(limit), url]
     xml_string = run_svn(svn_log_args + args)
     return parse_svn_log_xml(xml_string)
 
-def get_svn_status(svn_wc, quiet=False):
+def get_svn_status(svn_wc, quiet=False, no_recursive=False):
     """
     Get SVN status information about the given working copy.
     """
@@ -188,6 +210,8 @@ def get_svn_status(svn_wc, quiet=False):
         args += ['-q']
     else:
         args += ['-v']
+    if no_recursive:
+        args += ['-N']
     xml_string = run_svn(svn_status_args + args)
     return parse_svn_status_xml(xml_string, svn_wc, ignore_externals=True)
 
@@ -201,19 +225,17 @@ def get_svn_versioned_files(svn_wc):
             contents.append(e['path'])
     return contents
 
-
-def get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=False):
+def get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=False, get_changed_paths=True, get_revprops=False):
     """
     Get the first SVN log entry in the requested revision range.
     """
-    entries = run_svn_log(svn_url, rev_start, rev_end, 1, stop_on_copy)
+    entries = run_svn_log(svn_url, rev_start, rev_end, 1, stop_on_copy, get_changed_paths, get_revprops)
     if entries:
         return entries[0]
     raise EmptySVNLog("No SVN log for %s between revisions %s and %s" %
         (svn_url, rev_start, rev_end))
 
-
-def get_first_svn_log_entry(svn_url, rev_start, rev_end):
+def get_first_svn_log_entry(svn_url, rev_start, rev_end, get_changed_paths=True):
     """
     Get the first log entry after (or at) the given revision number in an SVN branch.
     By default the revision number is set to 0, which will give you the log
@@ -223,21 +245,21 @@ def get_first_svn_log_entry(svn_url, rev_start, rev_end):
     a copy from another branch, inspect elements of the 'changed_paths' entry
     in the returned dictionary.
     """
-    return get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=True)
+    return get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=True, get_changed_paths=True)
 
-def get_last_svn_log_entry(svn_url, rev_start, rev_end):
+def get_last_svn_log_entry(svn_url, rev_start, rev_end, get_changed_paths=True):
     """
-    Get the last log entry before (or at) the given revision number in an SVN branch.
+    Get the last log entry before/at the given revision number in an SVN branch.
     By default the revision number is set to HEAD, which will give you the log
     entry corresponding to the latest commit in branch.
     """
-    return get_one_svn_log_entry(svn_url, rev_end, rev_start, stop_on_copy=True)
+    return get_one_svn_log_entry(svn_url, rev_end, rev_start, stop_on_copy=True, get_changed_paths=True)
 
 
 log_duration_threshold = 10.0
 log_min_chunk_length = 10
 
-def iter_svn_log_entries(svn_url, first_rev, last_rev, retry):
+def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_changed_paths=True, get_revprops=False):
     """
     Iterate over SVN log entries between first_rev and last_rev.
 
@@ -250,10 +272,8 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, retry):
     while last_rev == "HEAD" or cur_rev <= last_rev:
         start_t = time.time()
         stop_rev = min(last_rev, cur_rev + chunk_length)
-        ui.status("Fetching %s SVN log entries starting from revision %d...",
-                  chunk_length, cur_rev, level=ui.VERBOSE)
-        entries = once_or_more("Fetching SVN log", retry, run_svn_log, svn_url,
-                               cur_rev, "HEAD", chunk_length)
+        entries = run_svn_log(svn_url, cur_rev, "HEAD", chunk_length,
+                              stop_on_copy, get_changed_paths, get_revprops)
         duration = time.time() - start_t
         if not first_run:
             # skip first revision on subsequent runs, as it is overlapped
