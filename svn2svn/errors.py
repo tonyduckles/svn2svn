@@ -1,17 +1,13 @@
-
 """
 Exception sub-hierarchy:
 
 RuntimeError
  +-- ExternalCommandFailed
- +-- CommitCancelled
- +-- HgSVNError
+ +-- SVNError
       +-- UnsupportedSVNFeature
-      |    +-- OverwrittenSVNBranch
       |    +-- UnsupportedSVNAction
       +-- SVNOutputError
            +-- EmptySVNLog
-
 """
 
 class ExternalCommandFailed(RuntimeError):
@@ -19,19 +15,14 @@ class ExternalCommandFailed(RuntimeError):
     An external command failed.
     """
 
-class HgSVNError(RuntimeError):
+class SVNError(RuntimeError):
     """
-    A generic hgsvn error.
+    A generic svn error.
     """
 
-class UnsupportedSVNFeature(HgSVNError):
+class UnsupportedSVNFeature(SVNError):
     """
     An unsuppported SVN (mis)feature.
-    """
-
-class OverwrittenSVNBranch(UnsupportedSVNFeature):
-    """
-    The current SVN branch was overwritten with another one.
     """
 
 class UnsupportedSVNAction(UnsupportedSVNFeature):
@@ -39,7 +30,7 @@ class UnsupportedSVNAction(UnsupportedSVNFeature):
     An unknown/unsupported SVN action in an SVN log entry.
     """
 
-class SVNOutputError(HgSVNError):
+class SVNOutputError(SVNError):
     """
     A generic error with the output of an SVN command.
     """
