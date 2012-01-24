@@ -87,7 +87,7 @@ def shell_quote(s):
         q = "'"
     return q + s.replace('\\', '\\\\').replace("'", "'\"'\"'") + q
 
-def _run_raw_command(cmd, args, fail_if_stderr=False):
+def _run_raw_command(cmd, args, fail_if_stderr=False, no_fail=False):
     cmd_string = "%s %s" % (cmd,  " ".join(map(shell_quote, args)))
     color = 'BLUE_B'
     if cmd == 'svn' and args[0] in ['status', 'st', 'log', 'info', 'list', 'propset', 'update', 'up', 'cleanup', 'revert']:
@@ -104,22 +104,22 @@ def _run_raw_command(cmd, args, fail_if_stderr=False):
     out, err = pipe.communicate()
     if "nothing changed" == out.strip(): # skip this error
         return out
-    if pipe.returncode != 0 or (fail_if_stderr and err.strip()):
+    if (pipe.returncode != 0 or (fail_if_stderr and err.strip())) and not no_fail:
         raise ExternalCommandFailed(
             "External program failed (return code %d): %s\n%s\n%s"
             % (pipe.returncode, cmd_string, err, out))
     return out
 
-def _run_raw_shell_command(cmd):
+def _run_raw_shell_command(cmd, no_fail=False):
     ui.status("* %s", cmd, level=ui.DEBUG)
     st, out = commands.getstatusoutput(cmd)
-    if st != 0:
+    if st != 0 and not nofail:
         raise ExternalCommandFailed(
             "External program failed with non-zero return code (%d): %s\n%s"
             % (st, cmd, out))
     return out
 
-def run_command(cmd, args=None, bulk_args=None, encoding=None, fail_if_stderr=False):
+def run_command(cmd, args=None, bulk_args=None, encoding=None, fail_if_stderr=False, no_fail=False):
     """
     Run a command without using the shell.
     """
@@ -134,7 +134,7 @@ def run_command(cmd, args=None, bulk_args=None, encoding=None, fail_if_stderr=Fa
 
     cmd = find_program(cmd)
     if not bulk_args:
-        return _run_raw_command(cmd, map(_transform_arg, args), fail_if_stderr)
+        return _run_raw_command(cmd, map(_transform_arg, args), fail_if_stderr, no_fail)
     # If one of bulk_args starts with a dash (e.g. '-foo.php'),
     # svn will take this as an option. Adding '--' ends the search for
     # further options.
@@ -150,11 +150,11 @@ def run_command(cmd, args=None, bulk_args=None, encoding=None, fail_if_stderr=Fa
         sub_args = []
         for a in bulk_args[i:stop]:
             sub_args.append(_transform_arg(a))
-        out += _run_raw_command(cmd, args + sub_args, fail_if_stderr)
+        out += _run_raw_command(cmd, args + sub_args, fail_if_stderr, no_fail)
         i = stop
     return out
 
-def run_shell_command(cmd, args=None, bulk_args=None, encoding=None):
+def run_shell_command(cmd, args=None, bulk_args=None, encoding=None, no_fail=False):
     """
     Run a shell command, properly quoting and encoding arguments.
     Probably only works on Un*x-like systems.
@@ -172,19 +172,19 @@ def run_shell_command(cmd, args=None, bulk_args=None, encoding=None):
     i = 0
     out = ""
     if not bulk_args:
-        return _run_raw_shell_command(cmd)
+        return _run_raw_shell_command(cmd, no_fail)
     while i < len(bulk_args):
         stop = i + max_args_num - len(args)
         sub_args = []
         for a in bulk_args[i:stop]:
             sub_args.append(_quote_arg(a))
         sub_cmd = cmd + " " + " ".join(sub_args)
-        out += _run_raw_shell_command(sub_cmd)
+        out += _run_raw_shell_command(sub_cmd, no_fail)
         i = stop
     return out
 
 def run_svn(args=None, bulk_args=None, fail_if_stderr=False,
-            mask_atsign=False):
+            mask_atsign=False, no_fail=False):
     """
     Run an SVN command, returns the (bytes) output.
     """
@@ -201,7 +201,7 @@ def run_svn(args=None, bulk_args=None, fail_if_stderr=False,
                     and bulk_args[idx][0] not in ("-", '"')):
                     bulk_args[idx] = "%s@" % bulk_args[idx]
     return run_command("svn",
-        args=args, bulk_args=bulk_args, fail_if_stderr=fail_if_stderr)
+        args=args, bulk_args=bulk_args, fail_if_stderr=fail_if_stderr, no_fail=no_fail)
 
 def skip_dirs(paths, basedir="."):
     """
