@@ -71,7 +71,7 @@ def status(msg, *args, **kwargs):
         stream = sys.stderr
     else:
         stream = sys.stdout
-    if kwargs.get('truncate', True) and level != ERROR:
+    if kwargs.get('truncate', False) and level != ERROR:
         add_newline = msg.endswith('\n')
         msglines = msg.splitlines()
         for no, line in enumerate(msglines):
