@@ -191,10 +191,9 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, ge
     if get_revprops:
         args += ['--with-all-revprops']
     url = str(svn_url_or_wc)
-    if rev_start != 'HEAD' and rev_end != 'HEAD':
-        args += ['-r', '%s:%s' % (rev_start, rev_end)]
-        if not "@" in svn_url_or_wc:
-            url = "%s@%s" % (svn_url_or_wc, str(max(rev_start, rev_end)))
+    args += ['-r', '%s:%s' % (rev_start, rev_end)]
+    if not "@" in svn_url_or_wc:
+        url = "%s@%s" % (svn_url_or_wc, str(max(rev_start, rev_end)))
     args += ['--limit', str(limit), url]
     xml_string = run_svn(svn_log_args + args)
     return parse_svn_log_xml(xml_string)
