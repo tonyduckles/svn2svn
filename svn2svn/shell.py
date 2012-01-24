@@ -1,18 +1,18 @@
 """ Shell functions """
 
-from svn2svn import ui
-from svn2svn.errors import ExternalCommandFailed
+from . import ui
+from errors import ExternalCommandFailed
 
 import os
 import locale
-from datetime import datetime
 import time
-from subprocess import Popen, PIPE, STDOUT
 import shutil
 import stat
 import sys
 import traceback
 import re
+from datetime import datetime
+from subprocess import Popen, PIPE, STDOUT
 
 try:
     import commands
@@ -78,11 +78,9 @@ def get_encoding():
     return locale_encoding
 
 def shell_quote(s):
-    global _debug_showcmd
-    if _debug_showcmd:
-        # If showing OS commands being executed, don't wrap "safe" strings in quotes.
-        if re.compile('^[A-Za-z0-9=-]+$').match(s):
-            return s
+    # No need to wrap "safe" strings in quotes
+    if re.compile('^[A-Za-z0-9=-]+$').match(s):
+        return s
     if os.name == "nt":
         q = '"'
     else:
@@ -91,7 +89,11 @@ def shell_quote(s):
 
 def _run_raw_command(cmd, args, fail_if_stderr=False):
     cmd_string = "%s %s" % (cmd,  " ".join(map(shell_quote, args)))
-    ui.status("* %s", cmd_string, level=ui.DEBUG)
+    color = 'BLUE_B'
+    if cmd == 'svn' and args[0] in ['status', 'st', 'log', 'info', 'list', 'propset', 'update', 'up', 'cleanup', 'revert']:
+        # Show status-only commands (commands which make no changes to WC) in dim-blue
+        color = 'BLUE'
+    ui.status("$ %s", cmd_string, level=ui.DEBUG, color=color)
     try:
         pipe = Popen([cmd] + args, executable=cmd, stdout=PIPE, stderr=PIPE)
     except OSError:

@@ -34,7 +34,6 @@ DEBUG = 30
 
 # Configuration
 _level = DEFAULT
-_debug_showcmd = False
 
 
 def status(msg, *args, **kwargs):
@@ -77,6 +76,5 @@ def status(msg, *args, **kwargs):
 
 def update_config(options):
     """Update UI configuration."""
-    global _level,_debug_showcmd
+    global _level
     _level = options.verbosity
-    _debug_showcmd = options.showcmd

@@ -1,13 +1,14 @@
 """ SVN client functions """
 
-from svn2svn import ui
-from svn2svn.shell import run_svn
-from svn2svn.errors import EmptySVNLog
+from . import ui
+from shell import run_svn
+from errors import EmptySVNLog
 
 import os
 import time
 import calendar
 import operator
+from operator import itemgetter
 
 try:
     from xml.etree import cElementTree as ET
