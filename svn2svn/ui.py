@@ -32,6 +32,18 @@ VERBOSE = 20
 DEBUG = 30
 
 
+# SGR foreground color codes
+_colors = {
+    'BLACK':    '30', 'BLACK_B':   '90',
+    'RED':      '31', 'RED_B':     '91',
+    'GREEN':    '32', 'GREEN_B':   '92',
+    'YELLOW':   '33', 'YELLOW_B':  '93',
+    'BLUE':     '34', 'BLUE_B':    '94',
+    'MAGENTA':  '35', 'MAGENTA_B': '95',
+    'CYAN':     '36', 'CYAN_B':    '96',
+    'WHITE':    '37', 'WHITE_B':   '97' }
+
+
 # Configuration
 _level = DEFAULT
 
@@ -70,6 +82,10 @@ def status(msg, *args, **kwargs):
             msg = '%s%s' % (msg, os.linesep)
     if isinstance(msg, unicode):
         msg = msg.encode('utf-8')
+    color = kwargs.get('color', None)
+    bold =  kwargs.get('bold',  None)
+    if color in _colors:
+        msg = '%s%s%s' % ("\x1b["+_colors[color]+(";1" if bold else "")+"m", msg, "\x1b[0m")
     stream.write(msg)
     stream.flush()
 
