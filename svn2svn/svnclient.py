@@ -1,6 +1,5 @@
 """ SVN client functions """
 
-from . import ui
 from shell import run_svn
 from errors import EmptySVNLog
 
@@ -24,7 +23,7 @@ except ImportError:
 svn_log_args = ['log', '--xml']
 svn_info_args = ['info', '--xml']
 svn_checkout_args = ['checkout', '-q']
-svn_status_args = ['status', '--xml', '-v', '--ignore-externals']
+svn_status_args = ['status', '--xml', '--ignore-externals']
 
 _identity_table = "".join(map(chr, range(256)))
 _forbidden_xml_chars = "".join(
@@ -206,14 +205,14 @@ def get_svn_status(svn_wc, quiet=False, no_recursive=False):
     """
     # Ensure proper stripping by canonicalizing the path
     svn_wc = os.path.abspath(svn_wc)
-    args = [svn_wc]
+    args = []
     if quiet:
         args += ['-q']
     else:
         args += ['-v']
     if no_recursive:
         args += ['-N']
-    xml_string = run_svn(svn_status_args + args)
+    xml_string = run_svn(svn_status_args + args + [svn_wc])
     return parse_svn_status_xml(xml_string, svn_wc, ignore_externals=True)
 
 def get_svn_versioned_files(svn_wc):
