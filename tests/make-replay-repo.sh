@@ -12,9 +12,6 @@ rm -rf $REPO _wc_target
 # Init repo
 echo "Creating _repo_replay..."
 svnadmin create $REPO
-# Add pre-revprop-change hook script, which is required by svn2svn
-cat > $REPO/hooks/pre-revprop-change < pre-revprop-change.example.sh
-chmod 755 $REPO/hooks/pre-revprop-change
 echo ""
 
 ## svn2svn /
