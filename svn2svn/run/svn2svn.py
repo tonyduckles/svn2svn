@@ -26,11 +26,12 @@ import sys
 import os
 import time
 import traceback
+import shutil
+import operator
 from optparse import OptionParser,OptionGroup
 from datetime import datetime
-from operator import itemgetter
 
-def commit_from_svn_log_entry(entry, files=None, keep_author=False, revprops=[]):
+def commit_from_svn_log_entry(entry, files=None, keep_author=False, source_props=[]):
     """
     Given an SVN log entry and an optional sequence of files, do an svn commit.
     """
@@ -44,12 +45,16 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False, revprops=[])
         options = ["commit", "--force-log", "-m", entry['message'] + "\nDate: " + svn_date, "--username", entry['author']]
     else:
         options = ["commit", "--force-log", "-m", entry['message'] + "\nDate: " + svn_date + "\nAuthor: " + entry['author']]
-    if revprops:
+    if source_props:
+        revprops = [{'name':'svn2svn:source_uuid', 'value':source_props[0]},
+                    {'name':'svn2svn:source_url',  'value':source_props[1]},
+                    {'name':'svn2svn:source_rev',  'value':source_props[2]}]
         for r in revprops:
             options += ["--with-revprop", r['name']+"="+str(r['value'])]
     if files:
         options += list(files)
     output = run_svn(options)
+    rev = None
     if output:
         output_lines = output.strip("\n").split("\n")
         rev = ""
@@ -59,6 +64,23 @@ def commit_from_svn_log_entry(entry, files=None, keep_author=False, revprops=[])
                 break
         if rev:
             ui.status("Committed revision %s.", rev)
+    return rev
+
+def full_svn_revert():
+    """
+    Do an "svn revert" and proactively remove any extra files in the working copy.
+    """
+    run_svn(["revert", "--recursive", "."])
+    output = run_svn(["status"])
+    if output:
+        output_lines = output.strip("\n").split("\n")
+        for line in output_lines:
+            if line[0] == "?":
+                path = line[4:].strip(" ")
+                if os.path.isfile(path):
+                    os.remove(path)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
 
 def in_svn(p, require_in_repo=False, prefix=""):
     """
@@ -137,7 +159,7 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
             done = True
             continue
         # Reverse-sort any matches, so that we start with the most-granular (deepest in the tree) path.
-        changed_paths = sorted(changed_paths_temp, key=itemgetter('path'), reverse=True)
+        changed_paths = sorted(changed_paths_temp, key=operator.itemgetter('path'), reverse=True)
         # Find the action for our working_path in this revision. Use a loop to check in reverse order,
         # so that if the target file/folder is "M" but has a parent folder with an "A" copy-from.
         for v in changed_paths:
@@ -203,18 +225,44 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
             svn_repos_url+base_path+"/"+source_path+"@"+str(source_rev), level=ui.DEBUG, color='YELLOW')
     return ancestors
 
-def get_rev_map(rev_map, src_rev, prefix):
+def get_rev_map(rev_map, source_rev, prefix):
     """
     Find the equivalent rev # in the target repo for the given rev # from the source repo.
     """
-    ui.status(prefix + ">> get_rev_map(%s)", src_rev, level=ui.DEBUG, color='GREEN')
-    # Find the highest entry less-than-or-equal-to src_rev
-    for rev in range(src_rev, 0, -1):
+    ui.status(prefix + ">> get_rev_map(%s)", source_rev, level=ui.DEBUG, color='GREEN')
+    # Find the highest entry less-than-or-equal-to source_rev
+    for rev in range(int(source_rev), 0, -1):
         ui.status(prefix + ">> get_rev_map: rev=%s  in_rev_map=%s", rev, str(rev in rev_map), level=ui.DEBUG, color='BLACK_B')
         if rev in rev_map:
-            return rev_map[rev]
+            return int(rev_map[rev])
     # Else, we fell off the bottom of the rev_map. Ruh-roh...
     return None
+
+def set_rev_map(rev_map, source_rev, target_rev):
+    ui.status(">> set_rev_map: source_rev=%s target_rev=%s", source_rev, target_rev, level=ui.DEBUG, color='GREEN')
+    rev_map[int(source_rev)]=int(target_rev)
+
+def build_rev_map(target_url, source_info):
+    """
+    Check for any already-replayed history from source_url (source_info) and
+    build the mapping-table of source_rev -> target_rev.
+    """
+    rev_map = {}
+    ui.status("Rebuilding rev_map...", level=ui.VERBOSE)
+    proc_count = 0
+    it_log_entries = svnclient.iter_svn_log_entries(target_url, 1, 'HEAD', get_changed_paths=False, get_revprops=True)
+    for log_entry in it_log_entries:
+        if log_entry['revprops']:
+            revprops = {}
+            for v in log_entry['revprops']:
+                if v['name'].startswith('svn2svn:'):
+                    revprops[v['name']] = v['value']
+            if revprops['svn2svn:source_uuid'] == source_info['repos_uuid'] and \
+               revprops['svn2svn:source_url'] == source_info['url']:
+                source_rev = revprops['svn2svn:source_rev']
+                target_rev = log_entry['revision']
+                set_rev_map(rev_map, source_rev, target_rev)
+    return rev_map
 
 def get_svn_dirlist(svn_path, svn_rev = ""):
     """
@@ -542,10 +590,8 @@ def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, tar
         commit_paths = []
 
     # Add source-tracking revprop's
-    revprops = [{'name':'source_uuid', 'value':source_repos_uuid},
-                {'name':'source_url',  'value':source_url},
-                {'name':'source_rev',  'value':source_rev}]
-    commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author, revprops=revprops)
+    source_props = [source_repos_uuid, source_url, source_rev]
+    return commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author, source_props=source_props)
 
 def run_parser(parser):
     """
@@ -590,106 +636,126 @@ def real_main(options, args):
     else:
         keep_author = False
 
-    # Find the greatest_rev in the source repo
-    svn_info = svnclient.get_svn_info(source_url)
-    greatest_rev = svn_info['revision']
-    # Get the base URL for the source repos, e.g. 'svn://svn.example.com/svn/repo'
-    source_repos_url = svn_info['repos_url']
-    # Get the UUID for the source repos
-    source_repos_uuid = svn_info['repos_uuid']
+    # Make sure that both the source and target URL's are valid
+    source_info = svnclient.get_svn_info(source_url)
+    assert source_url.startswith(source_info['repos_url'])
+    target_info = svnclient.get_svn_info(target_url)
+    assert target_url.startswith(target_info['repos_url'])
 
-    wc_target = "_wc_target"
+    source_end_rev = source_info['revision']       # Get the last revision # for the source repo
+    source_repos_url = source_info['repos_url']    # Get the base URL for the source repo, e.g. 'svn://svn.example.com/svn/repo'
+    source_repos_uuid = source_info['repos_uuid']  # Get the UUID for the source repo
+
+    wc_target = os.path.abspath('_wc_target')
     rev_map = {}
 
-    # if old working copy does not exist, disable continue mode
-    # TODO: Better continue support. Maybe include source repo's rev # in target commit info?
-    if not os.path.exists(wc_target):
-        options.cont_from_break = False
+    # Check out a working copy of target_url if needed
+    wc_exists = os.path.exists(wc_target)
+    if wc_exists and not options.cont_from_break:
+        shutil.rmtree(wc_target)
+        wc_exists = False
+    if not wc_exists:
+        svnclient.svn_checkout(target_url, wc_target)
+    os.chdir(wc_target)
 
     if not options.cont_from_break:
         # Get log entry for the SVN revision we will check out
         if options.svn_rev:
             # If specify a rev, get log entry just before or at rev
-            svn_start_log = svnclient.get_last_svn_log_entry(source_url, 1, options.svn_rev, False)
+            source_start_log = svnclient.get_last_svn_log_entry(source_url, 1, options.svn_rev, False)
         else:
             # Otherwise, get log entry of branch creation
-            # TODO: This call is *very* expensive on a repo with lots of revisions.
-            #       Even though the call is passing --limit 1, it seems like that limit-filter
-            #       is happening after SVN has fetched the full log history.
-            svn_start_log = svnclient.get_first_svn_log_entry(source_url, 1, greatest_rev, False)
+            # Note: Trying to use svnclient.get_first_svn_log_entry(source_url, 1, source_end_rev, False)
+            # ends-up being *VERY* time-consuming on a repo with lots of revisions. Even though
+            # the "svn log" call is passing --limit 1, it seems like that limit-filter is happening
+            # _after_ svn has fetched the full log history. Instead, search the history in chunks
+            # and write some progress to the screen.
+            ui.status("Searching for start source revision (%s)...", source_url, level=ui.VERBOSE)
+            rev = 1
+            chunk_size = 1000
+            done = False
+            while not done:
+                entries = svnclient.run_svn_log(source_url, rev, min(rev+chunk_size-1, target_info['revision']), 1, get_changed_paths=False)
+                if entries:
+                    source_start_log = entries[0]
+                    done = True
+                    break
+                ui.status("...%s...", rev)
+                rev = rev+chunk_size
+                if rev > target_info['revision']:
+                    done = True
+            if not source_start_log:
+                raise RuntimeError("Unable to find first revision for source_url: %s" % source_url)
 
         # This is the revision we will start from for source_url
-        source_start_rev = svn_start_log['revision']
-
-        # Check out a working copy of target_url
-        wc_target = os.path.abspath(wc_target)
-        if os.path.exists(wc_target):
-            shutil.rmtree(wc_target)
-        svnclient.svn_checkout(target_url, wc_target)
-        os.chdir(wc_target)
+        source_start_rev = source_rev = int(source_start_log['revision'])
+        ui.status("Starting at source revision %s.", source_start_rev, level=ui.VERBOSE)
 
         # For the initial commit to the target URL, export all the contents from
         # the source URL at the start-revision.
-        paths = run_svn(["list", "-r", source_start_rev, source_url+"@"+str(source_start_rev)])
+        paths = run_svn(["list", "-r", source_rev, source_url+"@"+str(source_rev)])
         if len(paths)>1:
-            disp_svn_log_summary(svnclient.get_one_svn_log_entry(source_url, source_start_rev, source_start_rev))
+            disp_svn_log_summary(svnclient.get_one_svn_log_entry(source_url, source_rev, source_rev))
             ui.status("(Initial import)", level=ui.VERBOSE)
             paths = paths.strip("\n").split("\n")
-            for path in paths:
+            for path_raw in paths:
                 # For each top-level file/folder...
-                if not path:
-                    # Skip null lines
-                    break
+                if not path_raw:
+                    continue
                 # Directories have a trailing slash in the "svn list" output
-                path_is_dir = True if path[-1] == "/" else False
-                if path_is_dir:
-                    path=path.rstrip('/')
-                    if not os.path.exists(path):
-                        os.makedirs(path)
-                run_svn(["export", "--force", "-r" , source_start_rev, source_url+"/"+path+"@"+str(source_start_rev), path])
+                path_is_dir = True if path_raw[-1] == "/" else False
+                path = path_raw.rstrip('/') if path_is_dir else path_raw
+                if path_is_dir and not os.path.exists(path):
+                    os.makedirs(path)
+                ui.status(" A %s", source_url[len(source_repos_url):]+"/"+path, level=ui.VERBOSE)
+                run_svn(["export", "--force", "-r" , source_rev, source_url+"/"+path+"@"+str(source_rev), path])
                 run_svn(["add", path])
-            revprops = [{'name':'source_uuid', 'value':source_repos_uuid},
-                        {'name':'source_url',  'value':source_url},
-                        {'name':'source_rev',  'value':source_start_rev}]
-            commit_from_svn_log_entry(svn_start_log, [], keep_author=keep_author, revprops=revprops)
+            source_props = [source_repos_uuid, source_url, source_rev]
+            target_rev = commit_from_svn_log_entry(source_start_log, [], keep_author=keep_author, source_props=source_props)
+            if target_rev:
+                set_rev_map(rev_map, source_rev, target_rev)
     else:
-        wc_target = os.path.abspath(wc_target)
-        os.chdir(wc_target)
-        # TODO: Need better resume support. For the time being, expect caller explictly passes in resume revision.
-        source_start_rev = options.svn_rev
-        if source_start_rev < 1:
-            display_error("Invalid arguments\n\nNeed to pass result rev # (-r) when using continue-mode (-c)", False)
+        # Re-build the rev_map based on any already-replayed history in target_url
+        rev_map = build_rev_map(target_url, source_info)
+        if not rev_map:
+            raise RuntimeError("Called with continue-mode, but no already-replayed history found in target repo: %s" % target_url)
+        source_start_rev = int(max(rev_map, key=rev_map.get))
+        assert source_start_rev
+        ui.status("Continue from source revision %s.", source_start_rev, level=ui.VERBOSE)
+
+    commit_count = 0
+    svn_vers_t = svnclient.get_svn_client_version()
+    svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
 
     # Load SVN log starting from source_start_rev + 1
-    it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev + 1, greatest_rev)
+    it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev)
 
     try:
         for log_entry in it_log_entries:
             # Replay this revision from source_url into target_url
-            pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url,
-                         target_url, rev_map, keep_author)
+            target_rev = pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url,
+                                      target_url, rev_map, keep_author)
             # Update our target working-copy, to ensure everything says it's at the new HEAD revision
             run_svn(["update"])
-            # TODO: Run "svn cleanup" every 50 commits if SVN 1.7+, to clean-up orphaned ".svn/pristines/*"
+            commit_count += 1
+            # Run "svn cleanup" every 100 commits if SVN 1.7+, to clean-up orphaned ".svn/pristines/*"
+            if svn_vers >= 1.7 and (commit_count % 100 == 0):
+                run_svn(["cleanup"])
             # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
-            dup_info = svnclient.get_svn_info(target_url)
-            dup_rev = dup_info['revision']
-            source_rev = log_entry['revision']
-            ui.status(">> main: rev_map.add: source_rev=%s target_rev=%s", source_rev, dup_rev, level=ui.DEBUG, color='GREEN')
-            rev_map[source_rev] = dup_rev
+            if target_rev:
+                source_rev = log_entry['revision']
+                set_rev_map(rev_map, source_rev, target_rev)
 
     except KeyboardInterrupt:
         print "\nStopped by user."
         run_svn(["cleanup"])
-        run_svn(["revert", "--recursive", "."])
-        # TODO: Run "svn status" and pro-actively delete any "?" orphaned entries, to clean-up the WC?
+        full_svn_revert()
     except:
         print "\nCommand failed with following error:\n"
         traceback.print_exc()
         run_svn(["cleanup"])
         print run_svn(["status"])
-        run_svn(["revert", "--recursive", "."])
-        # TODO: Run "svn status" and pro-actively delete any "?" orphaned entries, to clean-up the WC?
+        full_svn_revert()
     finally:
         run_svn(["update"])
         print "\nFinished!"

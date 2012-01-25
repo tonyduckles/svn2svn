@@ -7,7 +7,6 @@ import os
 import time
 import calendar
 import operator
-from operator import itemgetter
 
 try:
     from xml.etree import cElementTree as ET
@@ -112,7 +111,7 @@ def parse_svn_log_xml(xml_string):
             })
         # Sort paths (i.e. into hierarchical order), so that process_svn_log_entry()
         # can process actions in depth-first order.
-        d['changed_paths'] = sorted(paths, key=itemgetter('path'))
+        d['changed_paths'] = sorted(paths, key=operator.itemgetter('path'))
         revprops = []
         for prop in entry.findall('.//revprops/property'):
             revprops.append({ 'name': prop.get('name'), 'value': prop.text })

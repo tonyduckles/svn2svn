@@ -111,7 +111,7 @@ def _run_raw_command(cmd, args, fail_if_stderr=False, no_fail=False):
     return out
 
 def _run_raw_shell_command(cmd, no_fail=False):
-    ui.status("* %s", cmd, level=ui.DEBUG)
+    ui.status("* %s", cmd, level=ui.DEBUG, color='BLUE')
     st, out = commands.getstatusoutput(cmd)
     if st != 0 and not nofail:
         raise ExternalCommandFailed(
