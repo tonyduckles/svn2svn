@@ -762,10 +762,37 @@ def real_main(options, args):
 
 def main():
     # Defined as entry point. Must be callable without arguments.
-    usage = "Usage: %prog [OPTIONS] source_url target_url"
+    usage = """Usage: %prog [OPTIONS] source_url target_url
+
+  Replicate (replay) history from one SVN repository to another. Maintain
+  logical ancestry wherever possible, so that 'svn log' on the replayed
+  repo will correctly follow file/folder renames.
+
+  == Examples ==
+  Create a copy of only /trunk from source repo, starting at r5000
+  $ svnadmin create /svn/target
+  $ svn mkdir -m 'Add trunk' file:///svn/target/trunk
+  $ svn2svn -av -r 5000 http://server/source/trunk file:///svn/target/trunk
+    1. The target_url will be checked-out to ./_wc_target
+    2. The first commit to http://server/source/trunk at/after r5000 will be
+       exported & added into _wc_target
+    3. All revisions affecting http://server/source/trunk (starting at r5000)
+       will be replayed to _wc_target. Any add/copy/move/replaces that are
+       copy-from'd some path outside of /trunk (e.g. files renamed on a /branch
+       and branch was merged into /trunk) will correctly maintain logical
+       ancestry where possible.
+
+  Use continue-mode (-c) to pick-up where the last run left-off
+  $ svn2svn -avc http://server/source/trunk file:///svn/target/trunk
+    1. The target_url will be checked-out to ./_wc_target, if not already
+       checked-out
+    2. All new revisions affecting http://server/source/trunk starting from
+       the last replayed revision to file:///svn/target/trunk (based on the
+       svn2svn:* revprops) will be replayed to _wc_target, maintaining all
+       logical ancestry where possible."""
     parser = OptionParser(usage)
     parser.add_option("-r", "--revision", type="int", dest="svn_rev", metavar="REV",
-                      help="initial SVN revision to checkout from")
+                      help="initial SVN revision to start source_url replay")
     parser.add_option("-a", "--keep-author", action="store_true", dest="keep_author",
                       help="maintain original Author info from source repo")
     parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
