@@ -293,15 +293,20 @@ def get_svn_dirlist(svn_path, svn_rev = ""):
     paths = paths.strip("\n").split("\n") if len(paths)>1 else []
     return paths
 
-def _add_export_path(export_paths, path_offset):
+def add_path(paths, path_offset):
+    """
+    Helper function to add a path to a list but only if a parent path isn't
+    already in the list. Assumes that paths are added roughly in breath-first
+    order.
+    """
     found = False
-    for p in export_paths:
+    for p in paths:
         if path_offset.startswith(p):
             found = True
             break
     if not found:
-        export_paths.append(path_offset)
-    return export_paths
+        paths.append(path_offset)
+    return paths
 
 def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev, \
                parent_copyfrom_path="", parent_copyfrom_rev="", export_paths={}, \
@@ -391,7 +396,7 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
                 run_svn(["copy", "-r", tgt_rev, target_url+"/"+copyfrom_offset+"@"+str(tgt_rev), path_offset])
                 # Export the final version of this file/folder from the source repo, to make
                 # sure we're up-to-date.
-                export_paths = _add_export_path(export_paths, path_offset)
+                export_paths = add_path(export_paths, path_offset)
         else:
             ui.status(prefix + ">> do_svn_add: Skipped 'svn copy': %s", path_offset, level=ui.DEBUG, color='GREEN')
     else:
@@ -406,7 +411,7 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
         if not in_svn(path_offset, prefix=prefix+"  "):
             if is_dir:
                 # Export the final verison of all files in this folder.
-                export_paths = _add_export_path(export_paths, path_offset)
+                export_paths = add_path(export_paths, path_offset)
             else:
                 # Export the final verison of this file. We *need* to do this before running
                 # the "svn add", even if we end-up re-exporting this file again via export_paths.
@@ -462,7 +467,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
     'commit_paths' is the working list of specific paths which changes to pass
       to the final "svn commit".
     """
-    removed_paths = []
     export_paths = []
     # Get the relative offset of source_url based on source_repos_url
     # e.g. '/branches/bug123'
@@ -487,12 +491,9 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
         if action not in 'MARD':
             raise UnsupportedSVNAction("In SVN rev. %d: action '%s' not supported. Please report a bug!"
                 % (source_rev, action))
-        if action not in 'D':
-            # (Note: Skip displaying action message for 'D' here since we'll display that
-            #  message when we process the deferred delete actions at the end.)
-            ui.status(" %s %s%s", action, d['path'],
-                (" (from %s)" % (d['copyfrom_path']+"@"+str(d['copyfrom_revision']))) if d['copyfrom_path'] else "",
-                level=ui.VERBOSE)
+        ui.status(" %s %s%s", action, d['path'],
+            (" (from %s)" % (d['copyfrom_path']+"@"+str(d['copyfrom_revision']))) if d['copyfrom_path'] else "",
+            level=ui.VERBOSE)
 
         # Try to be efficient and keep track of an explicit list of paths in the
         # working copy that changed. If we commit from the root of the working copy,
@@ -514,9 +515,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
         # Handle all the various action-types
         # (Handle "add" first, for "svn copy/move" support)
         if action == 'A':
-            # If we have any queued deletions for this same path, remove those if we're re-adding this path.
-            if path_offset in removed_paths:
-                removed_paths.remove(path_offset)
             # Determine where to export from.
             svn_copy = False
             path_is_dir = True if d['kind'] == 'dir' else False
@@ -534,12 +532,20 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
                     run_svn(["mkdir", p_path])
                 # Export the entire added tree.
                 if path_is_dir:
-                    export_paths = _add_export_path(export_paths, path_offset)
+                    # For directories, defer the (recurisve) "svn export". Might have a
+                    # situation in a branch merge where the entry in the svn-log is a
+                    # non-copy-from'd "add" but there are child contents (that we haven't
+                    # gotten to yet in log_entry) that are copy-from's.  When we try do
+                    # the "svn copy" later on in do_svn_add() for those copy-from'd paths,
+                    # having pre-existing (svn-add'd) contents creates some trouble.
+                    # Instead, just create the stub folders ("svn mkdir" above) and defer
+                    # exporting the final file-state until the end.
+                    export_paths = add_path(export_paths, path_offset)
                 else:
                     # Export the final verison of this file. We *need* to do this before running
                     # the "svn add", even if we end-up re-exporting this file again via export_paths.
                     run_svn(["export", "--force", "-r", source_rev,
-                             source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
+                             source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
                 if not in_svn(path_offset, prefix=prefix+"  "):
                     # Need to use in_svn here to handle cases where client committed the parent
                     # folder and each indiv sub-folder.
@@ -547,10 +553,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
                 # TODO: Need to copy SVN properties from source repos
 
         elif action == 'D':
-            # Queue "svn remove" commands, to allow the action == 'A' handling the opportunity
-            # to do smart "svn copy" handling on copy/move/renames.
-            if not path_offset in removed_paths:
-                removed_paths.append(path_offset)
+            run_svn(["remove", "--force", path_offset])
 
         elif action == 'M':
             # TODO: Is "svn merge -c" correct here? Should this just be an "svn export" plus
@@ -563,17 +566,11 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
             raise SVNError("Internal Error: process_svn_log_entry: Unhandled 'action' value: '%s'"
                 % action)
 
-    # Process any deferred removed actions
-    if removed_paths:
-        path_base = source_url[len(source_repos_url):]
-        for path_offset in removed_paths:
-            ui.status(" %s %s", 'D', path_base+"/"+path_offset, level=ui.VERBOSE)
-            run_svn(["remove", "--force", path_offset])
     # Export the final version of all add'd paths from source_url
     if export_paths:
         for path_offset in export_paths:
             run_svn(["export", "--force", "-r", source_rev,
-                     source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
+                     source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
 
     return commit_paths
 
