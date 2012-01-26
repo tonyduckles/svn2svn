@@ -498,10 +498,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
         # Try to be efficient and keep track of an explicit list of paths in the
         # working copy that changed. If we commit from the root of the working copy,
         # then SVN needs to crawl the entire working copy looking for pending changes.
-        # But, if we gather too many paths to commit, then we wipe commit_paths below
-        # and end-up doing a commit at the root of the working-copy.
-        if len (commit_paths) < 100:
-            commit_paths.append(path_offset)
+        commit_paths = add_path(commit_paths, path_offset)
 
         # Special-handling for replace's
         if action == 'R':
