@@ -40,8 +40,8 @@ cd $WC
 
 # Initial Population
 mkdir -p $WC/Module/ProjectA
-echo "Module/ProjectA/FileA1.txt (Initial)" > $WC/Module/ProjectA/FileA1.txt
-echo "Module/ProjectA/FileA2.txt (Initial)" > $WC/Module/ProjectA/FileA2.txt
+echo "Module/ProjectA/FileA1.txt (Initial)" >> $WC/Module/ProjectA/FileA1.txt
+echo "Module/ProjectA/FileA2.txt (Initial)" >> $WC/Module/ProjectA/FileA2.txt
 svn -q add $WC/Module
 svn_commit "Initial population"
 
@@ -52,12 +52,14 @@ svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
 show_last_commit
 mkdir -p $WC/Module/ProjectB
-echo "Module/ProjectB/FileB1.txt (Test 1)" > $WC/Module/ProjectB/FileB1.txt
+echo "Module/ProjectB/FileB1.txt (Test 1)" >> $WC/Module/ProjectB/FileB1.txt
 svn add -q $WC/Module/ProjectB
 svn_commit "Test 1: Add Module/ProjectB"
 svn switch -q $TRUNK
 svn merge -q $BRANCH
-svn_commit "Test 1: Add Module/ProjectB"
+svn ci -q --with-revprop 'testprop=Test 1 message' -m "Test 1: Add Module/ProjectB"
+svn up -q
+show_last_commit
 
 # Test #2: Rename files
 # * Test rename support
@@ -67,7 +69,7 @@ svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
 show_last_commit
 svn mv -q Module/ProjectA/FileA2.txt Module/ProjectB/FileB2.txt
-echo "Module/ProjectB/FileB2.txt (Test 2)" > $WC/Module/ProjectB/FileB2.txt
+echo "Module/ProjectB/FileB2.txt (Test 2)" >> $WC/Module/ProjectB/FileB2.txt
 svn_commit "Test 2: Rename Module/ProjectA/FileA2.txt -> Module/ProjectB/FileB2.txt (part 1 of 2)" Module/ProjectA
 svn_commit "Test 2: Rename Module/ProjectA/FileA2.txt -> Module/ProjectB/FileB2.txt (part 2 of 2)" Module/ProjectB
 svn switch -q $TRUNK
@@ -92,7 +94,7 @@ svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
 show_last_commit
 svn rm -q Module/ProjectA/FileA1.txt
-echo "Module/ProjectA/FileA1.txt (Test 4 - Replaced)" > $WC/Module/ProjectA/FileA1.txt
+echo "Module/ProjectA/FileA1.txt (Test 4 - Replaced)" >> $WC/Module/ProjectA/FileA1.txt
 svn add -q Module/ProjectA/FileA1.txt
 svn_commit "Test 4: Replace Module/ProjectA/FileA1.txt"
 svn switch -q $TRUNK
