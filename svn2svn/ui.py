@@ -24,13 +24,12 @@ def termwidth():
         pass
     return 80
 
-
 # Log levels
 ERROR = 0
 DEFAULT = 10
 VERBOSE = 20
-DEBUG = 30
-
+EXTRA = 30
+DEBUG = 40
 
 # SGR foreground color codes
 _colors = {
@@ -43,10 +42,8 @@ _colors = {
     'CYAN':     '36', 'CYAN_B':    '96',
     'WHITE':    '37', 'WHITE_B':   '97' }
 
-
 # Configuration
 _level = DEFAULT
-
 
 def status(msg, *args, **kwargs):
     """Write a status message.
@@ -89,8 +86,12 @@ def status(msg, *args, **kwargs):
     stream.write(msg)
     stream.flush()
 
-
 def update_config(options):
     """Update UI configuration."""
     global _level
     _level = options.verbosity
+
+def get_level():
+    """Verbosity level"""
+    global _level
+    return _level

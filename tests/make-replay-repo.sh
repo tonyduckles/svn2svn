@@ -19,4 +19,4 @@ echo ""
 
 # svn2svn /trunk
 svn mkdir -q -m "Add /trunk" $REPOURL/trunk
-../svn2svn.py -a -v file://$PWD/_repo_ref/trunk file://$PWD/_repo_replay/trunk
+../svn2svn.py -a $1 file://$PWD/_repo_ref/trunk file://$PWD/_repo_replay/trunk

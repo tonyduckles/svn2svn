@@ -93,7 +93,7 @@ def _run_raw_command(cmd, args, fail_if_stderr=False, no_fail=False):
     if cmd == 'svn' and args[0] in ['status', 'st', 'log', 'info', 'list', 'propset', 'update', 'up', 'cleanup', 'revert']:
         # Show status-only commands (commands which make no changes to WC) in dim-blue
         color = 'BLUE'
-    ui.status("$ %s", cmd_string, level=ui.DEBUG, color=color)
+    ui.status("$ %s", cmd_string, level=ui.EXTRA, color=color)
     try:
         pipe = Popen([cmd] + args, executable=cmd, stdout=PIPE, stderr=PIPE)
     except OSError:
@@ -111,7 +111,7 @@ def _run_raw_command(cmd, args, fail_if_stderr=False, no_fail=False):
     return out
 
 def _run_raw_shell_command(cmd, no_fail=False):
-    ui.status("* %s", cmd, level=ui.DEBUG, color='BLUE')
+    ui.status("* %s", cmd, level=ui.EXTRA, color='BLUE')
     st, out = commands.getstatusoutput(cmd)
     if st != 0 and not nofail:
         raise ExternalCommandFailed(

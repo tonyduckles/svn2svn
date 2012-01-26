@@ -59,6 +59,9 @@ def commit_from_svn_log_entry(log_entry, files=None, keep_author=False, target_r
             options += ["--with-revprop", "%s=%s" % (key, str(revprops[key]))]
     if files:
         options += list(files)
+    if ui.get_level() >= ui.EXTRA:
+        ui.status(">> commit_from_svn_log_entry: Pre-commit _wc_target status:", level=ui.EXTRA, color='CYAN')
+        ui.status(run_svn(["status"]), level=ui.EXTRA, color='CYAN')
     output = run_svn(options)
     rev = None
     if output:
@@ -223,18 +226,19 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
             working_path = working_path.replace(d['path'], d['copyfrom_path'])
             working_rev =  d['copyfrom_rev']
             ancestors.append({'path': working_path, 'revision': working_rev})
-        max_len = 0
-        for idx in range(len(ancestors)):
-            d = ancestors[idx]
-            max_len = max(max_len, len(d['path']+"@"+str(d['revision'])))
-        ui.status(prefix + ">> find_svn_ancestors: Found parent ancestors:", level=ui.DEBUG, color='YELLOW_B')
-        for idx in range(len(ancestors)-1):
-            d = ancestors[idx]
-            d_next = ancestors[idx+1]
-            ui.status(prefix + " [%s] %s <-- %s", idx,
-                str(d['path']+"@"+str(d['revision'])).ljust(max_len),
-                str(d_next['path']+"@"+str(d_next['revision'])).ljust(max_len),
-                level=ui.DEBUG, color='YELLOW')
+        if ui.get_level() >= ui.DEBUG:
+            max_len = 0
+            for idx in range(len(ancestors)):
+                d = ancestors[idx]
+                max_len = max(max_len, len(d['path']+"@"+str(d['revision'])))
+            ui.status(prefix + ">> find_svn_ancestors: Found parent ancestors:", level=ui.DEBUG, color='YELLOW_B')
+            for idx in range(len(ancestors)-1):
+                d = ancestors[idx]
+                d_next = ancestors[idx+1]
+                ui.status(prefix + " [%s] %s <-- %s", idx,
+                    str(d['path']+"@"+str(d['revision'])).ljust(max_len),
+                    str(d_next['path']+"@"+str(d_next['revision'])).ljust(max_len),
+                    level=ui.DEBUG, color='YELLOW')
     else:
         ui.status(prefix + ">> find_svn_ancestors: No ancestor-chain found: %s",
             svn_repos_url+base_path+"/"+source_path+"@"+str(source_rev), level=ui.DEBUG, color='YELLOW')
@@ -611,12 +615,10 @@ def run_parser(parser):
     parser.remove_option("--help")
     parser.add_option("-h", "--help", dest="show_help", action="store_true",
         help="show this help message and exit")
-    parser.add_option("-v", "--verbose", dest="verbosity", const=ui.VERBOSE,
-                      default=10, action="store_const",
-                      help="enable additional output")
-    parser.add_option("--debug", dest="verbosity", const=ui.DEBUG,
-                      action="store_const",
-                      help="enable debugging output")
+    parser.add_option("-v", "--verbose", dest="verbosity", action="count", default=1,
+        help="enable additional output (use -vv or -vvv for more)")
+    parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
+        help="enable debugging output (same as -vvv)")
     options, args = parser.parse_args()
     if options.show_help:
         parser.print_help()
@@ -625,6 +627,9 @@ def run_parser(parser):
         prog_name = os.path.basename(sys.argv[0])
         print prog_name, full_version
         sys.exit(0)
+    if options.verbosity < 10:
+        # Expand multiple "-v" arguments to a real ui._level value
+        options.verbosity *= 10
     ui.update_config(options)
     return options, args
 
