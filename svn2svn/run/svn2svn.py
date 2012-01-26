@@ -31,26 +31,32 @@ import operator
 from optparse import OptionParser,OptionGroup
 from datetime import datetime
 
-def commit_from_svn_log_entry(entry, files=None, keep_author=False, source_props=[]):
+def commit_from_svn_log_entry(log_entry, files=None, keep_author=False, target_revprops=[]):
     """
     Given an SVN log entry and an optional sequence of files, do an svn commit.
     """
     # TODO: Run optional external shell hook here, for doing pre-commit filtering
     # This will use the local timezone for displaying commit times
-    timestamp = int(entry['date'])
+    timestamp = int(log_entry['date'])
     svn_date = str(datetime.fromtimestamp(timestamp))
     # Uncomment this one one if you prefer UTC commit times
     #svn_date = "%d 0" % timestamp
     if keep_author:
-        options = ["commit", "--force-log", "-m", entry['message'] + "\nDate: " + svn_date, "--username", entry['author']]
+        options = ["commit", "--force-log", "-m", log_entry['message'] + "\nDate: " + svn_date, "--username", log_entry['author']]
     else:
-        options = ["commit", "--force-log", "-m", entry['message'] + "\nDate: " + svn_date + "\nAuthor: " + entry['author']]
-    if source_props:
-        revprops = [{'name':'svn2svn:source_uuid', 'value':source_props[0]},
-                    {'name':'svn2svn:source_url',  'value':source_props[1]},
-                    {'name':'svn2svn:source_rev',  'value':source_props[2]}]
-        for r in revprops:
-            options += ["--with-revprop", r['name']+"="+str(r['value'])]
+        options = ["commit", "--force-log", "-m", log_entry['message'] + "\nDate: " + svn_date + "\nAuthor: " + log_entry['author']]
+    revprops = {}
+    if log_entry['revprops']:
+        # Carry forward any revprop's from the source revision
+        for v in log_entry['revprops']:
+            revprops[v['name']] = v['value']
+    if target_revprops:
+        # Add any extra revprop's we want to set for the target repo commits
+        for v in target_revprops:
+            revprops[v['name']] = v['value']
+    if revprops:
+        for key in revprops:
+            options += ["--with-revprop", "%s=%s" % (key, str(revprops[key]))]
     if files:
         options += list(files)
     output = run_svn(options)
@@ -81,6 +87,15 @@ def full_svn_revert():
                     os.remove(path)
                 if os.path.isdir(path):
                     shutil.rmtree(path)
+
+def gen_tracking_revprops(source_repos_uuid, source_url, source_rev):
+    """
+    Build an array of svn2svn-specific source-tracking revprops.
+    """
+    revprops = [{'name':'svn2svn:source_uuid', 'value':source_repos_uuid},
+                {'name':'svn2svn:source_url',  'value':source_url},
+                {'name':'svn2svn:source_rev',  'value':source_rev}]
+    return revprops
 
 def in_svn(p, require_in_repo=False, prefix=""):
     """
@@ -589,9 +604,9 @@ def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, tar
     if len (commit_paths) > 99:
         commit_paths = []
 
-    # Add source-tracking revprop's
-    source_props = [source_repos_uuid, source_url, source_rev]
-    return commit_from_svn_log_entry(log_entry, commit_paths, keep_author=keep_author, source_props=source_props)
+    target_revprops = gen_tracking_revprops(source_repos_uuid, source_url, source_rev)   # Build source-tracking revprop's
+    return commit_from_svn_log_entry(log_entry, commit_paths, \
+                keep_author=keep_author, target_revprops=target_revprops)
 
 def run_parser(parser):
     """
@@ -710,8 +725,9 @@ def real_main(options, args):
                 ui.status(" A %s", source_url[len(source_repos_url):]+"/"+path, level=ui.VERBOSE)
                 run_svn(["export", "--force", "-r" , source_rev, source_url+"/"+path+"@"+str(source_rev), path])
                 run_svn(["add", path])
-            source_props = [source_repos_uuid, source_url, source_rev]
-            target_rev = commit_from_svn_log_entry(source_start_log, [], keep_author=keep_author, source_props=source_props)
+            target_revprops = gen_tracking_revprops(source_repos_uuid, source_url, source_rev)   # Build source-tracking revprop's
+            target_rev = commit_from_svn_log_entry(source_start_log, \
+                            keep_author=keep_author, target_revprops=target_revprops)
             if target_rev:
                 set_rev_map(rev_map, source_rev, target_rev)
     else:
@@ -721,14 +737,14 @@ def real_main(options, args):
             raise RuntimeError("Called with continue-mode, but no already-replayed history found in target repo: %s" % target_url)
         source_start_rev = int(max(rev_map, key=rev_map.get))
         assert source_start_rev
-        ui.status("Continue from source revision %s.", source_start_rev, level=ui.VERBOSE)
+        ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
 
     commit_count = 0
     svn_vers_t = svnclient.get_svn_client_version()
     svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
 
     # Load SVN log starting from source_start_rev + 1
-    it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev)
+    it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev, get_revprops=True)
 
     try:
         for log_entry in it_log_entries:
