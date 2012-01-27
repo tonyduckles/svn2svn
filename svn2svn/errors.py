@@ -8,6 +8,8 @@ RuntimeError
       |    +-- UnsupportedSVNAction
       +-- SVNOutputError
            +-- EmptySVNLog
+ +-- InternalError
+     +-- VerificationError
 """
 
 class ExternalCommandFailed(RuntimeError):
@@ -38,4 +40,14 @@ class SVNOutputError(SVNError):
 class EmptySVNLog(SVNOutputError):
     """
     An empty SVN log entry.
+    """
+
+class InternalError(RuntimeError):
+    """
+    An internal error in the svn2svn logic.
+    """
+
+class VerificationError(InternalError):
+    """
+    An error found during verify-mode.
     """

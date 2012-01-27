@@ -20,7 +20,7 @@ from .. import base_version, full_version
 from .. import ui
 from .. import svnclient
 from ..shell import run_svn
-from ..errors import (ExternalCommandFailed, UnsupportedSVNAction)
+from ..errors import (ExternalCommandFailed, UnsupportedSVNAction, InternalError, VerificationError)
 
 import sys
 import os
@@ -30,6 +30,8 @@ import shutil
 import operator
 from optparse import OptionParser,OptionGroup
 from datetime import datetime
+
+_valid_svn_actions = "MARD"   # The list of known SVN action abbr's, from "svn log"
 
 def commit_from_svn_log_entry(log_entry, options, commit_paths=None, target_revprops=None):
     """
@@ -69,15 +71,18 @@ def commit_from_svn_log_entry(log_entry, options, commit_paths=None, target_revp
             # the root of the working-copy.
             args += list(commit_paths)
     rev = None
-    if output:
-        output_lines = output.strip("\n").split("\n")
-        rev = ""
-        for line in output_lines:
-            if line[0:19] == 'Committed revision ':
-                rev = line[19:].rstrip('.')
-                break
-        if rev:
-            ui.status("Committed revision %s.", rev)
+    if not options.dry_run:
+        # Run the "svn commit" command, and screen-scrape the target_rev value (if any)
+        output = run_svn(args)
+        if output:
+            output_lines = output.strip("\n").split("\n")
+            rev = ""
+            for line in output_lines:
+                if line[0:19] == 'Committed revision ':
+                    rev = line[19:].rstrip('.')
+                    break
+            if rev:
+                ui.status("Committed revision %s.", rev)
     return rev
 
 def full_svn_revert():
@@ -190,7 +195,7 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
             path = d['path']
             # Check action-type for this file
             action = d['action']
-            if action not in 'MARD':
+            if action not in _valid_svn_actions:
                 raise UnsupportedSVNAction("In SVN rev. %d: action '%s' not supported. Please report a bug!"
                     % (log_entry['revision'], action))
             ui.status(prefix + "> %s %s%s", action, path,
@@ -302,20 +307,15 @@ def get_svn_dirlist(svn_path, svn_rev = ""):
     paths = paths.strip("\n").split("\n") if len(paths)>1 else []
     return paths
 
-def add_path(paths, path_offset):
-    """
-    Helper function to add a path to a list but only if a parent path isn't
-    already in the list. Assumes that paths are added roughly in breath-first
-    order.
-    """
-    found = False
+def path_in_list(paths, path):
     for p in paths:
-        if path_offset.startswith(p):
-            found = True
-            break
-    if not found:
-        paths.append(path_offset)
-    return paths
+        if path.startswith(p):
+            return True
+    return False
+
+def add_path(paths, path):
+    if not path_in_list(paths, path):
+        paths.append(path)
 
 def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev, \
                parent_copyfrom_path="", parent_copyfrom_rev="", export_paths={}, \
@@ -405,7 +405,7 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
                 run_svn(["copy", "-r", tgt_rev, target_url+"/"+copyfrom_offset+"@"+str(tgt_rev), path_offset])
                 # Export the final version of this file/folder from the source repo, to make
                 # sure we're up-to-date.
-                export_paths = add_path(export_paths, path_offset)
+                add_path(export_paths, path_offset)
         else:
             ui.status(prefix + ">> do_svn_add: Skipped 'svn copy': %s", path_offset, level=ui.DEBUG, color='GREEN')
     else:
@@ -420,7 +420,7 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
         if not in_svn(path_offset, prefix=prefix+"  "):
             if is_dir:
                 # Export the final verison of all files in this folder.
-                export_paths = add_path(export_paths, path_offset)
+                add_path(export_paths, path_offset)
             else:
                 # Export the final verison of this file. We *need* to do this before running
                 # the "svn add", even if we end-up re-exporting this file again via export_paths.
@@ -461,7 +461,7 @@ def do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target
             #       where we only delete all files from folder but leave orphaned folder around.
 
 def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
-                          rev_map, commit_paths = [], prefix = ""):
+                          rev_map, options, commit_paths = [], prefix = ""):
     """
     Process SVN changes from the given log entry.
     Returns array of all the paths in the working-copy that were changed,
@@ -491,13 +491,15 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
             if path != source_base:
                 ui.status(prefix + ">> process_svn_log_entry: Unrelated path: %s  (base: %s)", path, source_base, level=ui.DEBUG, color='GREEN')
             continue
+        assert len(d['kind'])>0
+        path_is_dir = True if d['kind'] == 'dir' else False
         # Calculate the offset (based on source_base) for this changed_path
         # e.g. 'projectA/file1.txt'
         # (path = source_base + "/" + path_offset)
         path_offset = path[len(source_base):].strip("/")
         # Get the action for this path
         action = d['action']
-        if action not in 'MARD':
+        if action not in _valid_svn_actions:
             raise UnsupportedSVNAction("In SVN rev. %d: action '%s' not supported. Please report a bug!"
                 % (source_rev, action))
         ui.status(" %s %s%s", action, d['path'],
@@ -507,7 +509,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
         # Try to be efficient and keep track of an explicit list of paths in the
         # working copy that changed. If we commit from the root of the working copy,
         # then SVN needs to crawl the entire working copy looking for pending changes.
-        commit_paths = add_path(commit_paths, path_offset)
+        add_path(commit_paths, path_offset)
 
         # Special-handling for replace's
         if action == 'R':
@@ -523,7 +525,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
         if action == 'A':
             # Determine where to export from.
             svn_copy = False
-            path_is_dir = True if d['kind'] == 'dir' else False
             # Handle cases where this "add" was a copy from another URL in the source repos
             if d['copyfrom_revision']:
                 copyfrom_path = d['copyfrom_path']
@@ -546,7 +547,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
                     # having pre-existing (svn-add'd) contents creates some trouble.
                     # Instead, just create the stub folders ("svn mkdir" above) and defer
                     # exporting the final file-state until the end.
-                    export_paths = add_path(export_paths, path_offset)
+                    add_path(export_paths, path_offset)
                 else:
                     # Export the final verison of this file. We *need* to do this before running
                     # the "svn add", even if we end-up re-exporting this file again via export_paths.
@@ -569,7 +570,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
                      source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
 
         else:
-            raise SVNError("Internal Error: process_svn_log_entry: Unhandled 'action' value: '%s'"
+            raise InternalError("Internal Error: process_svn_log_entry: Unhandled 'action' value: '%s'"
                 % action)
 
     # Export the final version of all add'd paths from source_url
@@ -588,55 +589,6 @@ def disp_svn_log_summary(log_entry):
         str(datetime.fromtimestamp(int(log_entry['date'])).isoformat(' ')))
     ui.status(log_entry['message'])
     ui.status("------------------------------------------------------------------------")
-
-def pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url, target_url, rev_map, keep_author=False):
-    """
-    Pull SVN changes from the given log entry.
-    Returns the new SVN revision.
-    If an exception occurs, it will rollback to revision 'source_rev - 1'.
-    """
-    disp_svn_log_summary(log_entry)
-    source_rev = log_entry['revision']
-
-    # Process all the paths in this log entry
-    commit_paths = []
-    process_svn_log_entry(log_entry, source_repos_url, source_url, target_url,
-                          rev_map, commit_paths)
-    # If we had too many individual paths to commit, wipe the list and just commit at
-    # the root of the working copy.
-    if len (commit_paths) > 99:
-        commit_paths = []
-
-    target_revprops = gen_tracking_revprops(source_repos_uuid, source_url, source_rev)   # Build source-tracking revprop's
-    return commit_from_svn_log_entry(log_entry, commit_paths, \
-                keep_author=keep_author, target_revprops=target_revprops)
-
-def run_parser(parser):
-    """
-    Add common options to an OptionParser instance, and run parsing.
-    """
-    parser.add_option("", "--version", dest="show_version", action="store_true",
-        help="show version and exit")
-    parser.remove_option("--help")
-    parser.add_option("-h", "--help", dest="show_help", action="store_true",
-        help="show this help message and exit")
-    parser.add_option("-v", "--verbose", dest="verbosity", action="count", default=1,
-        help="enable additional output (use -vv or -vvv for more)")
-    parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
-        help="enable debugging output (same as -vvv)")
-    options, args = parser.parse_args()
-    if options.show_help:
-        parser.print_help()
-        sys.exit(0)
-    if options.show_version:
-        prog_name = os.path.basename(sys.argv[0])
-        print prog_name, full_version
-        sys.exit(0)
-    if options.verbosity < 10:
-        # Expand multiple "-v" arguments to a real ui._level value
-        options.verbosity *= 10
-    ui.update_config(options)
-    return options, args
 
 def display_parser_error(parser, message):
     """
@@ -679,6 +631,7 @@ def real_main(options, args):
     os.chdir(wc_target)
 
     if not options.cont_from_break:
+        # TODO: Warn user if trying to start (non-continue) into a non-empty target path?
         # Get log entry for the SVN revision we will check out
         if options.svn_rev:
             # If specify a rev, get log entry just before or at rev
@@ -705,7 +658,7 @@ def real_main(options, args):
                 if rev > target_info['revision']:
                     done = True
             if not source_start_log:
-                raise RuntimeError("Unable to find first revision for source_url: %s" % source_url)
+                raise InternalError("Unable to find first revision for source_url: %s" % source_url)
 
         # This is the revision we will start from for source_url
         source_start_rev = source_rev = int(source_start_log['revision'])
@@ -730,6 +683,7 @@ def real_main(options, args):
                 ui.status(" A %s", source_url[len(source_repos_url):]+"/"+path, level=ui.VERBOSE)
                 run_svn(["export", "--force", "-r" , source_rev, source_url+"/"+path+"@"+str(source_rev), path])
                 run_svn(["add", path])
+            num_entries_proc += 1
             target_revprops = gen_tracking_revprops(source_repos_uuid, source_url, source_rev)   # Build source-tracking revprop's
             target_rev = commit_from_svn_log_entry(source_start_log, options, target_revprops=target_revprops)
             if target_rev:
@@ -756,6 +710,9 @@ def real_main(options, args):
 
     try:
         for log_entry in it_log_entries:
+            if options.entries_proc_limit:
+                if num_entries_proc >= options.entries_proc_limit:
+                    break
             # Replay this revision from source_url into target_url
             disp_svn_log_summary(log_entry)
             source_rev = log_entry['revision']
@@ -815,9 +772,9 @@ def main():
        exported & added into _wc_target
     3. All revisions affecting http://server/source/trunk (starting at r5000)
        will be replayed to _wc_target. Any add/copy/move/replaces that are
-       copy-from'd some path outside of /trunk (e.g. files renamed on a /branch
-       and branch was merged into /trunk) will correctly maintain logical
-       ancestry where possible.
+       copy-from'd some path outside of /trunk (e.g. files renamed on a
+       /branch and branch was merged into /trunk) will correctly maintain
+       logical ancestry where possible.
 
   Use continue-mode (-c) to pick-up where the last run left-off
   $ svn2svn -avc http://server/source/trunk file:///svn/target/trunk
@@ -827,16 +784,35 @@ def main():
        the last replayed revision to file:///svn/target/trunk (based on the
        svn2svn:* revprops) will be replayed to _wc_target, maintaining all
        logical ancestry where possible."""
-    parser = OptionParser(usage)
+    parser = OptionParser(usage, version="%prog "+str(full_version))
+    #parser.remove_option("--help")
+    #parser.add_option("-h", "--help", dest="show_help", action="store_true",
+    #    help="show this help message and exit")
     parser.add_option("-r", "--revision", type="int", dest="svn_rev", metavar="REV",
                       help="initial SVN revision to start source_url replay")
-    parser.add_option("-a", "--keep-author", action="store_true", dest="keep_author",
-                      help="maintain original Author info from source repo")
+    parser.add_option("-a", "--keep-author", action="store_true", dest="keep_author", default=False,
+                      help="maintain original 'Author' info from source repo")
     parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
                       help="continue from previous break")
-    (options, args) = run_parser(parser)
+    parser.add_option("-l", "--limit", type="int", dest="entries_proc_limit", metavar="NUM",
+                      help="maximum number of log entries to process")
+    parser.add_option("-n", "--dry-run", action="store_true", dest="dry_run", default=False,
+                      help="try processing next log entry but don't commit changes to "
+                           "target working-copy (forces --limit=1)")
+    parser.add_option("-v", "--verbose", dest="verbosity", action="count", default=1,
+                      help="enable additional output (use -vv or -vvv for more)")
+    parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
+                      help="enable debugging output (same as -vvv)")
+    options, args = parser.parse_args()
     if len(args) != 2:
         display_parser_error(parser, "incorrect number of arguments")
+    if options.verbosity < 10:
+        # Expand multiple "-v" arguments to a real ui._level value
+        options.verbosity *= 10
+    if options.dry_run:
+        # When in dry-run mode, only try to process the next log_entry
+        options.entries_proc_limit = 1
+    ui.update_config(options)
     return real_main(options, args)
 
 
