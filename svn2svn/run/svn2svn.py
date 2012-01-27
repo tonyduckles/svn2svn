@@ -31,20 +31,25 @@ import operator
 from optparse import OptionParser,OptionGroup
 from datetime import datetime
 
-def commit_from_svn_log_entry(log_entry, files=None, keep_author=False, target_revprops=[]):
+def commit_from_svn_log_entry(log_entry, options, commit_paths=None, target_revprops=None):
     """
-    Given an SVN log entry and an optional sequence of files, do an svn commit.
+    Given an SVN log entry and an optional list of changed paths, do an svn commit.
     """
     # TODO: Run optional external shell hook here, for doing pre-commit filtering
+    # Display the _wc_target "svn status" info if running in -vv (or higher) mode
+    if ui.get_level() >= ui.EXTRA:
+        ui.status(">> commit_from_svn_log_entry: Pre-commit _wc_target status:", level=ui.EXTRA, color='CYAN')
+        ui.status(run_svn(["status"]), level=ui.EXTRA, color='CYAN')
     # This will use the local timezone for displaying commit times
     timestamp = int(log_entry['date'])
     svn_date = str(datetime.fromtimestamp(timestamp))
     # Uncomment this one one if you prefer UTC commit times
     #svn_date = "%d 0" % timestamp
-    if keep_author:
-        options = ["commit", "--force-log", "-m", log_entry['message'] + "\nDate: " + svn_date, "--username", log_entry['author']]
+    args = ["commit", "--force-log"]
+    if options.keep_author:
+        args += ["-m", log_entry['message'] + "\nDate: " + svn_date, "--username", log_entry['author']]
     else:
-        options = ["commit", "--force-log", "-m", log_entry['message'] + "\nDate: " + svn_date + "\nAuthor: " + log_entry['author']]
+        args += ["-m", log_entry['message'] + "\nDate: " + svn_date + "\nAuthor: " + log_entry['author']]
     revprops = {}
     if log_entry['revprops']:
         # Carry forward any revprop's from the source revision
@@ -56,13 +61,13 @@ def commit_from_svn_log_entry(log_entry, files=None, keep_author=False, target_r
             revprops[v['name']] = v['value']
     if revprops:
         for key in revprops:
-            options += ["--with-revprop", "%s=%s" % (key, str(revprops[key]))]
-    if files:
-        options += list(files)
-    if ui.get_level() >= ui.EXTRA:
-        ui.status(">> commit_from_svn_log_entry: Pre-commit _wc_target status:", level=ui.EXTRA, color='CYAN')
-        ui.status(run_svn(["status"]), level=ui.EXTRA, color='CYAN')
-    output = run_svn(options)
+            args += ["--with-revprop", "%s=%s" % (key, str(revprops[key]))]
+    if commit_paths:
+        if len(commit_paths)<100:
+            # If we don't have an excessive amount of individual changed paths, pass
+            # those to the "svn commit" command. Else, pass nothing so we commit at
+            # the root of the working-copy.
+            args += list(commit_paths)
     rev = None
     if output:
         output_lines = output.strip("\n").split("\n")
@@ -645,10 +650,7 @@ def display_parser_error(parser, message):
 def real_main(options, args):
     source_url = args.pop(0).rstrip("/")
     target_url = args.pop(0).rstrip("/")
-    if options.keep_author:
-        keep_author = True
-    else:
-        keep_author = False
+    ui.status("options: %s", str(options), level=ui.DEBUG, color='GREEN')
 
     # Make sure that both the source and target URL's are valid
     source_info = svnclient.get_svn_info(source_url)
@@ -662,6 +664,10 @@ def real_main(options, args):
 
     wc_target = os.path.abspath('_wc_target')
     rev_map = {}
+    num_entries_proc = 0
+    commit_count = 0
+    source_rev = None
+    target_rev = None
 
     # Check out a working copy of target_url if needed
     wc_exists = os.path.exists(wc_target)
@@ -725,10 +731,13 @@ def real_main(options, args):
                 run_svn(["export", "--force", "-r" , source_rev, source_url+"/"+path+"@"+str(source_rev), path])
                 run_svn(["add", path])
             target_revprops = gen_tracking_revprops(source_repos_uuid, source_url, source_rev)   # Build source-tracking revprop's
-            target_rev = commit_from_svn_log_entry(source_start_log, \
-                            keep_author=keep_author, target_revprops=target_revprops)
+            target_rev = commit_from_svn_log_entry(source_start_log, options, target_revprops=target_revprops)
             if target_rev:
+                # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
                 set_rev_map(rev_map, source_rev, target_rev)
+                # Update our target working-copy, to ensure everything says it's at the new HEAD revision
+                run_svn(["update"])
+                commit_count += 1
     else:
         # Re-build the rev_map based on any already-replayed history in target_url
         rev_map = build_rev_map(target_url, source_info)
@@ -738,42 +747,55 @@ def real_main(options, args):
         assert source_start_rev
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
 
-    commit_count = 0
     svn_vers_t = svnclient.get_svn_client_version()
     svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
 
     # Load SVN log starting from source_start_rev + 1
     it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev, get_revprops=True)
+    source_rev = None
 
     try:
         for log_entry in it_log_entries:
             # Replay this revision from source_url into target_url
-            target_rev = pull_svn_rev(log_entry, source_repos_url, source_repos_uuid, source_url,
-                                      target_url, rev_map, keep_author)
-            # Update our target working-copy, to ensure everything says it's at the new HEAD revision
-            run_svn(["update"])
-            commit_count += 1
-            # Run "svn cleanup" every 100 commits if SVN 1.7+, to clean-up orphaned ".svn/pristines/*"
-            if svn_vers >= 1.7 and (commit_count % 100 == 0):
-                run_svn(["cleanup"])
-            # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
+            disp_svn_log_summary(log_entry)
+            source_rev = log_entry['revision']
+            # Process all the changed-paths in this log entry
+            commit_paths = []
+            process_svn_log_entry(log_entry, source_repos_url, source_url, target_url,
+                                  rev_map, options, commit_paths)
+            num_entries_proc += 1
+            # Commit any changes made to _wc_target
+            target_revprops = gen_tracking_revprops(source_repos_uuid, source_url, source_rev)   # Build source-tracking revprop's
+            target_rev = commit_from_svn_log_entry(log_entry, options, commit_paths, target_revprops=target_revprops)
             if target_rev:
+                # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
                 source_rev = log_entry['revision']
                 set_rev_map(rev_map, source_rev, target_rev)
+                # Update our target working-copy, to ensure everything says it's at the new HEAD revision
+                run_svn(["update"])
+                commit_count += 1
+                # Run "svn cleanup" every 100 commits if SVN 1.7+, to clean-up orphaned ".svn/pristines/*"
+                if svn_vers >= 1.7 and (commit_count % 100 == 0):
+                    run_svn(["cleanup"])
+        if not source_rev:
+            # If there were no new source_url revisions to process, init source_rev
+            # for the "finally" message below.
+            source_rev = source_end_rev
 
     except KeyboardInterrupt:
         print "\nStopped by user."
+        print "\nCleaning-up..."
         run_svn(["cleanup"])
         full_svn_revert()
     except:
         print "\nCommand failed with following error:\n"
         traceback.print_exc()
+        print "\nCleaning-up..."
         run_svn(["cleanup"])
         print run_svn(["status"])
         full_svn_revert()
     finally:
-        run_svn(["update"])
-        print "\nFinished!"
+        print "\nFinished at source revision %s." % source_rev
 
 def main():
     # Defined as entry point. Must be callable without arguments.
