@@ -21,6 +21,7 @@ from .. import ui
 from .. import svnclient
 from ..shell import run_svn
 from ..errors import (ExternalCommandFailed, UnsupportedSVNAction, InternalError, VerificationError)
+from parse import HelpFormatter
 
 import sys
 import os
@@ -28,7 +29,7 @@ import time
 import traceback
 import shutil
 import operator
-from optparse import OptionParser,OptionGroup
+import optparse
 from datetime import datetime
 
 _valid_svn_actions = "MARD"   # The list of known SVN action abbr's, from "svn log"
@@ -590,15 +591,6 @@ def disp_svn_log_summary(log_entry):
     ui.status(log_entry['message'])
     ui.status("------------------------------------------------------------------------")
 
-def display_parser_error(parser, message):
-    """
-    Display an options error, and terminate.
-    """
-    print "error:", message
-    print
-    parser.print_help()
-    sys.exit(1)
-
 def real_main(options, args):
     source_url = args.pop(0).rstrip("/")
     target_url = args.pop(0).rstrip("/")
@@ -756,8 +748,8 @@ def real_main(options, args):
 
 def main():
     # Defined as entry point. Must be callable without arguments.
-    usage = """Usage: %prog [OPTIONS] source_url target_url
-
+    usage = "Usage: %prog [OPTIONS] source_url target_url"
+    description = """\
   Replicate (replay) history from one SVN repository to another. Maintain
   logical ancestry wherever possible, so that 'svn log' on the replayed
   repo will correctly follow file/folder renames.
@@ -784,7 +776,8 @@ def main():
        the last replayed revision to file:///svn/target/trunk (based on the
        svn2svn:* revprops) will be replayed to _wc_target, maintaining all
        logical ancestry where possible."""
-    parser = OptionParser(usage, version="%prog "+str(full_version))
+    parser = optparse.OptionParser(usage, description=description,
+                formatter=HelpFormatter(), version="%prog "+str(full_version))
     #parser.remove_option("--help")
     #parser.add_option("-h", "--help", dest="show_help", action="store_true",
     #    help="show this help message and exit")
@@ -805,7 +798,7 @@ def main():
                       help="enable debugging output (same as -vvv)")
     options, args = parser.parse_args()
     if len(args) != 2:
-        display_parser_error(parser, "incorrect number of arguments")
+        parser.error("incorrect number of arguments")
     if options.verbosity < 10:
         # Expand multiple "-v" arguments to a real ui._level value
         options.verbosity *= 10
