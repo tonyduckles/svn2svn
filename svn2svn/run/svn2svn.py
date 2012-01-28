@@ -1,19 +1,5 @@
 """
-Replicate (replay) changesets from one SVN repository to another:
-* Maintains full logical history (e.g. uses "svn copy" for renames).
-* Maintains original commit messages.
-* Optionally maintain source author info. (Only supported if accessing
-  target SVN repo via file://)
-* Cannot maintain original commit date, but appends original commit date
-  for each commit message: "Date: %d".
-* Optionally run an external shell script before each replayed commit
-  to give the ability to dynamically exclude or modify files as part
-  of the replay.
-
-License: GPLv3, same as hgsvn (https://bitbucket.org/andialbrecht/hgsvn)
-Author: Tony Duckles (https://github.com/tonyduckles/svn2svn)
-(Inspired by http://code.google.com/p/svn2svn/, and uses code for hgsvn
- for SVN client handling)
+Replicate (replay) changesets from one SVN repository to another.
 """
 
 from .. import base_version, full_version
