@@ -19,11 +19,6 @@ except ImportError:
         except ImportError:
             from elementtree import ElementTree as ET
 
-svn_log_args = ['log', '--xml']
-svn_info_args = ['info', '--xml']
-svn_checkout_args = ['checkout', '-q']
-svn_status_args = ['status', '--xml', '--ignore-externals']
-
 _identity_table = "".join(map(chr, range(256)))
 _forbidden_xml_chars = "".join(
     set(map(chr, range(32))) - set('\x09\x0A\x0D')
@@ -161,28 +156,29 @@ def get_svn_info(svn_url_or_wc, rev_number=None):
     specified revision number.
     Returns a dict as created by parse_svn_info_xml().
     """
+    args = ['info', '--xml']
     if rev_number is not None:
-        args = ["-r", rev_number, svn_url_or_wc+"@"+str(rev_number)]
+        args += ["-r", rev_number, svn_url_or_wc+"@"+str(rev_number)]
     else:
-        args = [svn_url_or_wc]
-    xml_string = run_svn(svn_info_args + args, fail_if_stderr=True)
+        args += [svn_url_or_wc]
+    xml_string = run_svn(args, fail_if_stderr=True)
     return parse_svn_info_xml(xml_string)
 
 def svn_checkout(svn_url, checkout_dir, rev_number=None):
     """
     Checkout the given URL at an optional revision number.
     """
-    args = []
+    args = ['checkout', '-q']
     if rev_number is not None:
         args += ['-r', rev_number]
     args += [svn_url, checkout_dir]
-    return run_svn(svn_checkout_args + args)
+    return run_svn(args)
 
 def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, get_changed_paths=True, get_revprops=False):
     """
     Fetch up to 'limit' SVN log entries between the given revisions.
     """
-    args = []
+    args = ['log', '--xml']
     if stop_on_copy:
         args += ['--stop-on-copy']
     if get_changed_paths:
@@ -194,7 +190,7 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, ge
     if not "@" in svn_url_or_wc:
         url = "%s@%s" % (svn_url_or_wc, str(max(rev_start, rev_end)))
     args += ['--limit', str(limit), url]
-    xml_string = run_svn(svn_log_args + args)
+    xml_string = run_svn(args)
     return parse_svn_log_xml(xml_string)
 
 def get_svn_status(svn_wc, quiet=False, no_recursive=False):
@@ -203,14 +199,14 @@ def get_svn_status(svn_wc, quiet=False, no_recursive=False):
     """
     # Ensure proper stripping by canonicalizing the path
     svn_wc = os.path.abspath(svn_wc)
-    args = []
+    args = ['status', '--xml', '--ignore-externals']
     if quiet:
         args += ['-q']
     else:
         args += ['-v']
     if no_recursive:
         args += ['-N']
-    xml_string = run_svn(svn_status_args + args + [svn_wc])
+    xml_string = run_svn(args + [svn_wc])
     return parse_svn_status_xml(xml_string, svn_wc, ignore_externals=True)
 
 def get_svn_versioned_files(svn_wc):

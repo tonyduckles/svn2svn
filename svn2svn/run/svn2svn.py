@@ -730,7 +730,7 @@ def real_main(options, args):
         print run_svn(["status"])
         full_svn_revert()
     finally:
-        print "\nFinished at source revision %s." % source_rev
+        print "\nFinished at source revision %s%s." % (source_rev, " (dry-run)" if options.dry_run else "")
 
 def main():
     # Defined as entry point. Must be callable without arguments.
