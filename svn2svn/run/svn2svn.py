@@ -20,6 +20,14 @@ from datetime import datetime
 
 _valid_svn_actions = "MARD"   # The list of known SVN action abbr's, from "svn log"
 
+# Module-level variables/parameters
+source_url = ""          # URL to source path in source SVN repo, e.g. 'http://server/svn/source/trunk'
+source_repos_url = ""    # URL to root of source SVN repo,        e.g. 'http://server/svn/source'
+source_base = ""         # Relative path of source_url in source SVN repo, e.g. '/trunk'
+source_repos_uuid = ""   # UUID of source SVN repo
+target_url =""           # URL to target path in target SVN repo, e.g. 'file:///svn/repo_target/trunk'
+rev_map = {}             # The running mapping-table dictionary for source_url rev #'s -> target_url rev #'s
+
 def commit_from_svn_log_entry(log_entry, options, commit_paths=None, target_revprops=None):
     """
     Given an SVN log entry and an optional list of changed paths, do an svn commit.
@@ -88,7 +96,7 @@ def full_svn_revert():
                 if os.path.isdir(path):
                     shutil.rmtree(path)
 
-def gen_tracking_revprops(source_repos_uuid, source_url, source_rev):
+def gen_tracking_revprops(source_rev):
     """
     Build an array of svn2svn-specific source-tracking revprops.
     """
@@ -241,7 +249,7 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
             svn_repos_url+base_path+"/"+source_path+"@"+str(source_rev), level=ui.DEBUG, color='YELLOW')
     return ancestors
 
-def get_rev_map(rev_map, source_rev, prefix):
+def get_rev_map(source_rev, prefix):
     """
     Find the equivalent rev # in the target repo for the given rev # from the source repo.
     """
@@ -254,8 +262,9 @@ def get_rev_map(rev_map, source_rev, prefix):
     # Else, we fell off the bottom of the rev_map. Ruh-roh...
     return None
 
-def set_rev_map(rev_map, source_rev, target_rev):
+def set_rev_map(source_rev, target_rev):
     ui.status(">> set_rev_map: source_rev=%s target_rev=%s", source_rev, target_rev, level=ui.DEBUG, color='GREEN')
+    global rev_map
     rev_map[int(source_rev)]=int(target_rev)
 
 def build_rev_map(target_url, source_info):
@@ -263,6 +272,7 @@ def build_rev_map(target_url, source_info):
     Check for any already-replayed history from source_url (source_info) and
     build the mapping-table of source_rev -> target_rev.
     """
+    global rev_map
     rev_map = {}
     ui.status("Rebuilding rev_map...", level=ui.VERBOSE)
     proc_count = 0
@@ -277,8 +287,7 @@ def build_rev_map(target_url, source_info):
                revprops['svn2svn:source_url'] == source_info['url']:
                 source_rev = revprops['svn2svn:source_rev']
                 target_rev = log_entry['revision']
-                set_rev_map(rev_map, source_rev, target_rev)
-    return rev_map
+                set_rev_map(source_rev, target_rev)
 
 def get_svn_dirlist(svn_path, svn_rev = ""):
     """
@@ -304,9 +313,8 @@ def add_path(paths, path):
     if not path_in_list(paths, path):
         paths.append(path)
 
-def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev, \
-               parent_copyfrom_path="", parent_copyfrom_rev="", export_paths={}, \
-               rev_map={}, is_dir = False, prefix = ""):
+def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom_rev="", \
+               export_paths={}, is_dir = False, prefix = ""):
     """
     Given the add'd source path, replay the "svn add/copy" commands to correctly
     track renames across copy-from's.
@@ -323,20 +331,14 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
     we'd lose the logical history that Proj2/file2.txt is really a descendant
     of Proj1/file1.txt.
 
-    'source_repos_url' is the full URL to the root of the source repository.
-    'source_url' is the full URL to the source path in the source repository.
     'path_offset' is the offset from source_base to the file to check ancestry for,
       e.g. 'projectA/file1.txt'. path = source_repos_url + source_base + path_offset.
-    'target_url' is the full URL to the target path in the target repository.
     'source_rev' is the revision ("svn log") that we're processing from the source repo.
     'parent_copyfrom_path' and 'parent_copyfrom_rev' is the copy-from path of the parent
       directory, when being called recursively by do_svn_add_dir().
     'export_paths' is the list of path_offset's that we've deferred running "svn export" on.
-    'rev_map' is the running mapping-table dictionary for source-repo rev #'s
-      to the equivalent target-repo rev #'s.
     'is_dir' is whether path_offset is a directory (rather than a file).
     """
-    source_base = source_url[len(source_repos_url):]
     ui.status(prefix + ">> do_svn_add: %s  %s", source_base+"/"+path_offset+"@"+str(source_rev),
         "  (parent-copyfrom: "+parent_copyfrom_path+"@"+str(parent_copyfrom_rev)+")" if parent_copyfrom_path else "",
         level=ui.DEBUG, color='GREEN')
@@ -354,7 +356,7 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
         found_ancestor = True
         # Map the copyfrom_rev (source repo) to the equivalent target repo rev #. This can
         # return None in the case where copyfrom_rev is *before* our source_start_rev.
-        tgt_rev = get_rev_map(rev_map, copyfrom_rev, prefix+"  ")
+        tgt_rev = get_rev_map(copyfrom_rev, prefix+"  ")
         ui.status(prefix + ">> do_svn_add: get_rev_map: %s (source) -> %s (target)", copyfrom_rev, tgt_rev, level=ui.DEBUG, color='GREEN')
     else:
         ui.status(prefix + ">> do_svn_add: Check copy-from: No ancestor chain found.", level=ui.DEBUG, color='GREEN')
@@ -419,12 +421,10 @@ def do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev
     if is_dir:
         # For any folders that we process, process any child contents, so that we correctly
         # replay copies/replaces/etc.
-        do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target_url,
-                       copyfrom_path, copyfrom_rev, export_paths, rev_map, prefix+"  ")
+        do_svn_add_dir(path_offset, source_rev, copyfrom_path, copyfrom_rev, export_paths, prefix+"  ")
 
-def do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target_url, \
-                   parent_copyfrom_path, parent_copyfrom_rev, export_paths, rev_map, prefix=""):
-    source_base = source_url[len(source_repos_url):]
+def do_svn_add_dir(path_offset, source_rev, parent_copyfrom_path, parent_copyfrom_rev, \
+                   export_paths, prefix=""):
     # Get the directory contents, to compare between the local WC (target_url) vs. the remote repo (source_url)
     # TODO: paths_local won't include add'd paths because "svn ls" lists the contents of the
     #       associated remote repo folder. (Is this a problem?)
@@ -436,9 +436,8 @@ def do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target
     for path in paths_remote:
         path_is_dir = True if path[-1] == "/" else False
         working_path = path_offset+"/"+(path.rstrip('/') if path_is_dir else path)
-        do_svn_add(source_repos_url, source_url, working_path, target_url, source_rev,
-                   parent_copyfrom_path, parent_copyfrom_rev, export_paths,
-                   rev_map, path_is_dir, prefix+"  ")
+        do_svn_add(working_path, source_rev, parent_copyfrom_path, parent_copyfrom_rev,
+                   export_paths, path_is_dir, prefix+"  ")
     # Remove files/folders which exist in local but not remote
     for path in paths_local:
         if not path in paths_remote:
@@ -447,26 +446,13 @@ def do_svn_add_dir(source_repos_url, source_url, path_offset, source_rev, target
             # TODO: Does this handle deleted folders too? Wouldn't want to have a case
             #       where we only delete all files from folder but leave orphaned folder around.
 
-def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
-                          rev_map, options, commit_paths = [], prefix = ""):
+def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
     """
-    Process SVN changes from the given log entry.
-    Returns array of all the paths in the working-copy that were changed,
-    i.e. the paths which need to be "svn commit".
-
-    'log_entry' is the array structure built by parse_svn_log_xml().
-    'source_repos_url' is the full URL to the root of the source repository.
-    'source_url' is the full URL to the source path in the source repository.
-    'target_url' is the full URL to the target path in the target repository.
-    'rev_map' is the running mapping-table dictionary for source-repo rev #'s
-      to the equivalent target-repo rev #'s.
-    'commit_paths' is the working list of specific paths which changes to pass
-      to the final "svn commit".
+    Process SVN changes from the given log entry. Build an array (commit_paths)
+    of the paths in the working-copy that were changed, i.e. the paths which
+    we'll pass to "svn commit".
     """
     export_paths = []
-    # Get the relative offset of source_url based on source_repos_url
-    # e.g. '/branches/bug123'
-    source_base = source_url[len(source_repos_url):]
     source_rev = log_entry['revision']
     ui.status(prefix + ">> process_svn_log_entry: %s", source_url+"@"+str(source_rev), level=ui.DEBUG, color='GREEN')
     for d in log_entry['changed_paths']:
@@ -516,8 +502,7 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
             if d['copyfrom_revision']:
                 copyfrom_path = d['copyfrom_path']
                 copyfrom_rev =  d['copyfrom_revision']
-                do_svn_add(source_repos_url, source_url, path_offset, target_url, source_rev,
-                           "", "", export_paths, rev_map, path_is_dir, prefix+"  ")
+                do_svn_add(path_offset, source_rev, "", "", export_paths, path_is_dir, prefix+"  ")
             # Else just "svn export" the files from the source repo and "svn add" them.
             else:
                 # Create (parent) directory if needed
@@ -566,8 +551,6 @@ def process_svn_log_entry(log_entry, source_repos_url, source_url, target_url, \
             run_svn(["export", "--force", "-r", source_rev,
                      source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
 
-    return commit_paths
-
 def disp_svn_log_summary(log_entry):
     ui.status("")
     ui.status("r%s | %s | %s",
@@ -578,8 +561,9 @@ def disp_svn_log_summary(log_entry):
     ui.status("------------------------------------------------------------------------")
 
 def real_main(options, args):
-    source_url = args.pop(0).rstrip("/")
-    target_url = args.pop(0).rstrip("/")
+    global source_url, target_url, rev_map
+    source_url = args.pop(0).rstrip("/")    # e.g. 'http://server/svn/source/trunk'
+    target_url = args.pop(0).rstrip("/")    # e.g. 'file:///svn/target/trunk'
     ui.status("options: %s", str(options), level=ui.DEBUG, color='GREEN')
 
     # Make sure that both the source and target URL's are valid
@@ -588,12 +572,14 @@ def real_main(options, args):
     target_info = svnclient.get_svn_info(target_url)
     assert target_url.startswith(target_info['repos_url'])
 
-    source_end_rev = source_info['revision']       # Get the last revision # for the source repo
-    source_repos_url = source_info['repos_url']    # Get the base URL for the source repo, e.g. 'svn://svn.example.com/svn/repo'
-    source_repos_uuid = source_info['repos_uuid']  # Get the UUID for the source repo
+    # Init global vars
+    global source_repos_url,source_base,source_repos_uuid
+    source_repos_url = source_info['repos_url']       # e.g. 'http://server/svn/source'
+    source_base = source_url[len(source_repos_url):]  # e.g. '/trunk'
+    source_repos_uuid = source_info['repos_uuid']
 
+    source_end_rev = source_info['revision']   # Last revision # in the source repo
     wc_target = os.path.abspath('_wc_target')
-    rev_map = {}
     num_entries_proc = 0
     commit_count = 0
     source_rev = None
@@ -662,17 +648,17 @@ def real_main(options, args):
                 run_svn(["export", "--force", "-r" , source_rev, source_url+"/"+path+"@"+str(source_rev), path])
                 run_svn(["add", path])
             num_entries_proc += 1
-            target_revprops = gen_tracking_revprops(source_repos_uuid, source_url, source_rev)   # Build source-tracking revprop's
+            target_revprops = gen_tracking_revprops(source_rev)   # Build source-tracking revprop's
             target_rev = commit_from_svn_log_entry(source_start_log, options, target_revprops=target_revprops)
             if target_rev:
                 # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
-                set_rev_map(rev_map, source_rev, target_rev)
+                set_rev_map(source_rev, target_rev)
                 # Update our target working-copy, to ensure everything says it's at the new HEAD revision
                 run_svn(["update"])
                 commit_count += 1
     else:
         # Re-build the rev_map based on any already-replayed history in target_url
-        rev_map = build_rev_map(target_url, source_info)
+        build_rev_map(target_url, source_info)
         if not rev_map:
             raise RuntimeError("Called with continue-mode, but no already-replayed history found in target repo: %s" % target_url)
         source_start_rev = int(max(rev_map, key=rev_map.get))
@@ -696,16 +682,15 @@ def real_main(options, args):
             source_rev = log_entry['revision']
             # Process all the changed-paths in this log entry
             commit_paths = []
-            process_svn_log_entry(log_entry, source_repos_url, source_url, target_url,
-                                  rev_map, options, commit_paths)
+            process_svn_log_entry(log_entry, options, commit_paths)
             num_entries_proc += 1
             # Commit any changes made to _wc_target
-            target_revprops = gen_tracking_revprops(source_repos_uuid, source_url, source_rev)   # Build source-tracking revprop's
+            target_revprops = gen_tracking_revprops(source_rev)   # Build source-tracking revprop's
             target_rev = commit_from_svn_log_entry(log_entry, options, commit_paths, target_revprops=target_revprops)
             if target_rev:
                 # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
                 source_rev = log_entry['revision']
-                set_rev_map(rev_map, source_rev, target_rev)
+                set_rev_map(source_rev, target_rev)
                 # Update our target working-copy, to ensure everything says it's at the new HEAD revision
                 run_svn(["update"])
                 commit_count += 1
