@@ -283,7 +283,8 @@ def build_rev_map(target_url, source_info):
             for v in log_entry['revprops']:
                 if v['name'].startswith('svn2svn:'):
                     revprops[v['name']] = v['value']
-            if revprops['svn2svn:source_uuid'] == source_info['repos_uuid'] and \
+            if revprops and \
+               revprops['svn2svn:source_uuid'] == source_info['repos_uuid'] and \
                revprops['svn2svn:source_url'] == source_info['url']:
                 source_rev = revprops['svn2svn:source_rev']
                 target_rev = log_entry['revision']
