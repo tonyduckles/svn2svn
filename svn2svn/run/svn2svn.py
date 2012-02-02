@@ -465,8 +465,9 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
             if path != source_base:
                 ui.status(prefix + ">> process_svn_log_entry: Unrelated path: %s  (base: %s)", path, source_base, level=ui.DEBUG, color='GREEN')
             continue
-        assert len(d['kind'])>0
-        path_is_dir = True if d['kind'] == 'dir' else False
+        # Note: d['kind']="" for action="M" paths which only have property changes.
+        path_is_dir =  True if d['kind'] == 'dir'  else False
+        path_is_file = True if d['kind'] == 'file' else False
         # Calculate the offset (based on source_base) for this changed_path
         # e.g. 'projectA/file1.txt'
         # (path = source_base + "/" + path_offset)
@@ -541,6 +542,7 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
             out = run_svn(["merge", "-c", source_rev, "--non-recursive",
                      "--non-interactive", "--accept=theirs-full",
                      source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
+            # TODO: If d['props'] == 'modified', then run code to clean-up/purge any newly-modified props?
 
         else:
             raise InternalError("Internal Error: process_svn_log_entry: Unhandled 'action' value: '%s'"
