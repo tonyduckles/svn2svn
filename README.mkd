@@ -77,3 +77,10 @@ This project was originally inspired by this "svn2svn" project:
 [http://code.google.com/p/svn2svn/](http://code.google.com/p/svn2svn/)  
 That project didn't fully meet my needs, so I forked and ended-up rewriting
 the majority of the code.
+
+Links
+-----
+* Introduction: "**[svn2svn: Replaying SVN History](http://nynim.org/blog/2012/02/01/svn2svn-replaying-svn-history/)**"
+* Project page: [http://nynim.org/projects/svn2svn](http://nynim.org/projects/svn2svn)
+* Source code @ Github: [https://github.com/tonyduckles/svn2svn](https://github.com/tonyduckles/svn2svn)
+* Source code @ git.nynim.org [http://git.nynim.org/svn2svn.git](http://git.nynim.org/svn2svn.git)
