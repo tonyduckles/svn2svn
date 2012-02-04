@@ -259,6 +259,18 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
 
     This function features chunked log fetching so that it isn't too nasty
     to the SVN server if many entries are requested.
+
+    NOTE: This chunked log fetching *ONLY* works correctly on paths which
+    are known to have existed unbroken in the SVN repository, e.g. /trunk.
+    Chunked fetching breaks down if a path existed in earlier, then was
+    deleted, and later was re-created. For example, if path was created in r5,
+    then deleted in r1000, and then later re-created in r5000...
+      svn log --stop-on-copy --limit 1 -r 1:50 "path/to/file"
+        --> would yield r5, i.e. the _initial_ creation
+      svn log --stop-on-copy --limit 1 -r 1:HEAD "path/to/file"
+        --> would yield r5000, i.e. the _re-creation_
+    In theory this might work if we always search "backwards", searching from
+    the end going forward rather than forward going to the end...
     """
     cur_rev = first_rev
     chunk_length = log_min_chunk_length
@@ -266,7 +278,7 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
     while last_rev == "HEAD" or cur_rev <= last_rev:
         start_t = time.time()
         stop_rev = min(last_rev, cur_rev + chunk_length)
-        entries = run_svn_log(svn_url, cur_rev, "HEAD", chunk_length,
+        entries = run_svn_log(svn_url, cur_rev, stop_rev, chunk_length,
                               stop_on_copy, get_changed_paths, get_revprops)
         duration = time.time() - start_t
         if not first_run:

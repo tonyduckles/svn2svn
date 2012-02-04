@@ -158,7 +158,7 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
     while not done:
         # Get the first "svn log" entry for this path (relative to @rev)
         ui.status(prefix + ">> find_svn_ancestors: %s", svn_repos_url + working_path+"@"+str(working_rev), level=ui.DEBUG, color='YELLOW')
-        log_entry = svnclient.get_first_svn_log_entry(svn_repos_url + working_path+"@"+str(working_rev), 1, working_rev, True)
+        log_entry = svnclient.get_first_svn_log_entry(svn_repos_url + working_path, 1, working_rev, True)
         if not log_entry:
             ui.status(prefix + ">> find_svn_ancestors: Done: no log_entry", level=ui.DEBUG, color='YELLOW')
             done = True
@@ -267,7 +267,7 @@ def set_rev_map(source_rev, target_rev):
     global rev_map
     rev_map[int(source_rev)]=int(target_rev)
 
-def build_rev_map(target_url, source_info):
+def build_rev_map(target_url, target_end_rev, source_info):
     """
     Check for any already-replayed history from source_url (source_info) and
     build the mapping-table of source_rev -> target_rev.
@@ -276,7 +276,7 @@ def build_rev_map(target_url, source_info):
     rev_map = {}
     ui.status("Rebuilding rev_map...", level=ui.VERBOSE)
     proc_count = 0
-    it_log_entries = svnclient.iter_svn_log_entries(target_url, 1, 'HEAD', get_changed_paths=False, get_revprops=True)
+    it_log_entries = svnclient.iter_svn_log_entries(target_url, 1, target_end_rev, get_changed_paths=False, get_revprops=True)
     for log_entry in it_log_entries:
         if log_entry['revprops']:
             revprops = {}
@@ -582,6 +582,7 @@ def real_main(options, args):
     source_repos_uuid = source_info['repos_uuid']
 
     source_end_rev = source_info['revision']   # Last revision # in the source repo
+    target_end_rev = target_info['revision']   # Last revision # in the target repo
     wc_target = os.path.abspath('_wc_target')
     num_entries_proc = 0
     commit_count = 0
@@ -605,25 +606,9 @@ def real_main(options, args):
             source_start_log = svnclient.get_last_svn_log_entry(source_url, 1, options.svn_rev, False)
         else:
             # Otherwise, get log entry of branch creation
-            # Note: Trying to use svnclient.get_first_svn_log_entry(source_url, 1, source_end_rev, False)
-            # ends-up being *VERY* time-consuming on a repo with lots of revisions. Even though
-            # the "svn log" call is passing --limit 1, it seems like that limit-filter is happening
-            # _after_ svn has fetched the full log history. Instead, search the history in chunks
-            # and write some progress to the screen.
-            ui.status("Searching for start source revision (%s)...", source_url, level=ui.VERBOSE)
-            rev = 1
-            chunk_size = 1000
-            done = False
-            while not done:
-                entries = svnclient.run_svn_log(source_url, rev, min(rev+chunk_size-1, target_info['revision']), 1, get_changed_paths=False)
-                if entries:
-                    source_start_log = entries[0]
-                    done = True
-                    break
-                ui.status("...%s...", rev)
-                rev = rev+chunk_size
-                if rev > target_info['revision']:
-                    done = True
+            it_log_start = svnclient.iter_svn_log_entries(source_url, 1, source_end_rev, get_changed_paths=False)
+            for source_start_log in it_log_start:
+                break
             if not source_start_log:
                 raise InternalError("Unable to find first revision for source_url: %s" % source_url)
 
@@ -661,7 +646,7 @@ def real_main(options, args):
                 commit_count += 1
     else:
         # Re-build the rev_map based on any already-replayed history in target_url
-        build_rev_map(target_url, source_info)
+        build_rev_map(target_url, target_end_rev, source_info)
         if not rev_map:
             raise RuntimeError("Called with continue-mode, but no already-replayed history found in target repo: %s" % target_url)
         source_start_rev = int(max(rev_map, key=rev_map.get))
@@ -672,7 +657,7 @@ def real_main(options, args):
     svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
 
     # Load SVN log starting from source_start_rev + 1
-    it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev, get_revprops=True)
+    it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev, get_revprops=True) if source_start_rev < source_end_rev else []
     source_rev = None
 
     try:
