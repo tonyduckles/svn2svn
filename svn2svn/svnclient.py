@@ -91,7 +91,7 @@ def parse_svn_log_xml(xml_string):
             d['date'] = svn_date_to_timestamp(date.text)
         else:
             d['date'] = None
-        d['message'] = msg is not None and msg.text.replace('\r\n', '\n').replace('\n\r', '\n').replace('\r', '\n') or ""
+        d['message'] = msg is not None and msg.text and msg.text.replace('\r\n', '\n').replace('\n\r', '\n').replace('\r', '\n') or ""
         paths = []
         for path in entry.findall('.//paths/path'):
             copyfrom_rev = path.get('copyfrom-rev')

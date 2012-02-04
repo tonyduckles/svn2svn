@@ -61,6 +61,10 @@ svn ci -q --with-revprop 'testprop=Test 1 message' -m "Test 1: Add Module/Projec
 svn up -q
 show_last_commit
 
+# Empty commit message
+echo "Module/ProjectB/FileB1.txt (Test 1.1)" >> $WC/Module/ProjectB/FileB1.txt
+svn_commit ""
+
 # Test #2: Rename files
 # * Test rename support
 # * Test committing rename in two different branch commits: first deletion, then add
