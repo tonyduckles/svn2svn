@@ -66,17 +66,52 @@ def parse_svn_info_xml(xml_string):
     d['last_changed_date'] = svn_date_to_timestamp(tree.find('.//commit/date').text)
     return d
 
-def parse_svn_log_xml(xml_string):
+def _get_kind(svn_repos_url, svn_path, svn_rev, action, paths):
+    """
+    Calculate the "kind"-type of a given URL in the SVN repo.
+    """
+    # By default, just do a simple "svn info" based on passed-in params.
+    info_path = svn_path
+    info_rev =  svn_rev
+    if action == 'D':
+        # For deletions, we can't do an "svn info" at this revision.
+        # Need to trace ancestry backwards.
+        parents = []
+        for p in paths:
+            # Build a list of any copy-from's in this log_entry that we're a child of.
+            if p['copyfrom_revision'] and svn_path.startswith(p['path']):
+                parents.append(p['path'])
+        if parents:
+            # Use the nearest copy-from'd parent
+            parents.sort()
+            parent = parents[len(parents)-1]
+            for p in paths:
+                if parent == p['path']:
+                    info_path = p['copyfrom_path']
+                    info_rev =  p['copyfrom_revision']
+        else:
+            # If no parent copy-from's, then we should be able to check this path in
+            # the preceeding revision.
+            info_rev -= 1
+    info = get_svn_info(svn_repos_url+info_path, info_rev)
+    return info['kind']
+
+def parse_svn_log_xml(xml_string, svn_url_or_wc):
     """
     Parse the XML output from an "svn log" command and extract useful information
     as a list of dicts (one per log changeset).
     """
     l = []
+    info = {}
+    svn_repos_url = ""
     xml_string = strip_forbidden_xml_chars(xml_string)
     tree = ET.fromstring(xml_string)
     for entry in tree.findall('logentry'):
         d = {}
         d['revision'] = int(entry.get('revision'))
+        if not info:
+            info = get_svn_info(svn_url_or_wc, d['revision'])
+            svn_repos_url = info['repos_url']
         # Some revisions don't have authors, most notably the first revision
         # in a repository.
         # logentry nodes targeting directories protected by path-based
@@ -97,10 +132,16 @@ def parse_svn_log_xml(xml_string):
             copyfrom_rev = path.get('copyfrom-rev')
             if copyfrom_rev:
                 copyfrom_rev = int(copyfrom_rev)
+            cur_path = path.text
+            kind = path.get('kind')
+            action = path.get('action')
+            if kind == "":
+                kind = _get_kind(svn_repos_url, cur_path, d['revision'], action, paths)
+            assert (kind == 'file') or (kind == 'dir')
             paths.append({
                 'path': path.text,
-                'kind': path.get('kind'),
-                'action': path.get('action'),
+                'kind': kind,
+                'action': action,
                 'copyfrom_path': path.get('copyfrom-path'),
                 'copyfrom_revision': copyfrom_rev,
             })
@@ -191,7 +232,7 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, ge
         url = "%s@%s" % (svn_url_or_wc, str(max(rev_start, rev_end)))
     args += ['--limit', str(limit), url]
     xml_string = run_svn(args)
-    return parse_svn_log_xml(xml_string)
+    return parse_svn_log_xml(xml_string, svn_url_or_wc)
 
 def get_svn_status(svn_wc, quiet=False, no_recursive=False):
     """
