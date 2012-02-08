@@ -293,6 +293,7 @@ def get_last_svn_log_entry(svn_url, rev_start, rev_end, get_changed_paths=True):
 
 log_duration_threshold = 10.0
 log_min_chunk_length = 10
+log_max_chunk_length = 10000
 
 def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_changed_paths=True, get_revprops=False):
     """
@@ -313,31 +314,30 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
     In theory this might work if we always search "backwards", searching from
     the end going forward rather than forward going to the end...
     """
+    if last_rev == "HEAD":
+        info = get_svn_info(svn_url)
+        last_rev = info['revision']
     cur_rev = first_rev
     chunk_length = log_min_chunk_length
-    first_run = True
-    while last_rev == "HEAD" or cur_rev <= last_rev:
+    while cur_rev <= last_rev:
         start_t = time.time()
         stop_rev = min(last_rev, cur_rev + chunk_length)
         entries = run_svn_log(svn_url, cur_rev, stop_rev, chunk_length,
                               stop_on_copy, get_changed_paths, get_revprops)
         duration = time.time() - start_t
-        if not first_run:
-            # skip first revision on subsequent runs, as it is overlapped
-            entries.pop(0)
-        first_run = False
-        if not entries:
-            break
-        for e in entries:
-            if e['revision'] > last_rev:
+        if entries:
+            for e in entries:
+                if e['revision'] > last_rev:
+                    break
+                yield e
+            if e['revision'] >= last_rev:
                 break
-            yield e
-        if e['revision'] >= last_rev:
-            break
-        cur_rev = e['revision']
+            cur_rev = e['revision']+1
+        else:
+            cur_rev = int(stop_rev)+1
         # Adapt chunk length based on measured request duration
         if duration < log_duration_threshold:
-            chunk_length = int(chunk_length * 2.0)
+            chunk_length = min(log_max_chunk_length, int(chunk_length * 2.0))
         elif duration > log_duration_threshold * 2:
             chunk_length = max(log_min_chunk_length, int(chunk_length / 2.0))
 
@@ -345,7 +345,8 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
 _svn_client_version = None
 
 def get_svn_client_version():
-    """Returns the SVN client version as a tuple.
+    """
+    Returns the SVN client version as a tuple.
 
     The returned tuple only contains numbers, non-digits in version string are
     silently ignored.
