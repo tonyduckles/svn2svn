@@ -468,6 +468,9 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
             ui.status(prefix + ">> process_svn_log_entry: Unrelated path: %s  (base: %s)", path, source_base, level=ui.DEBUG, color='GREEN')
             continue
         # Note: d['kind']="" for action="M" paths which only have property changes.
+        if d['kind'] == "":
+            d['kind'] = svnclient.get_kind(source_repos_url, path, source_rev, d['action'], log_entry['changed_paths'])
+        assert (d['kind'] == 'file') or (d['kind'] == 'dir')
         path_is_dir =  True if d['kind'] == 'dir'  else False
         path_is_file = True if d['kind'] == 'file' else False
         # Calculate the offset (based on source_base) for this changed_path
