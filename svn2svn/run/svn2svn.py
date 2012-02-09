@@ -581,7 +581,10 @@ def real_main(options, args):
     source_base = source_url[len(source_repos_url):]  # e.g. '/trunk'
     source_repos_uuid = source_info['repos_uuid']
 
-    source_end_rev = source_info['revision']   # Last revision # in the source repo
+    # Init start and end revision
+    source_start_rev = svnclient.get_svn_rev(source_repos_url, options.svn_rev_start if options.svn_rev_start else 1)
+    source_end_rev   = svnclient.get_svn_rev(source_repos_url, options.svn_rev_end   if options.svn_rev_end   else "HEAD")
+
     target_end_rev = target_info['revision']   # Last revision # in the target repo
     wc_target = os.path.abspath('_wc_target')
     num_entries_proc = 0
@@ -600,17 +603,14 @@ def real_main(options, args):
 
     if not options.cont_from_break:
         # TODO: Warn user if trying to start (non-continue) into a non-empty target path?
-        # Get log entry for the SVN revision we will check out
-        if options.svn_rev:
-            # If specify a rev, get log entry just before or at rev
-            source_start_log = svnclient.get_last_svn_log_entry(source_url, 1, options.svn_rev, False)
-        else:
-            # Otherwise, get log entry of branch creation
-            it_log_start = svnclient.iter_svn_log_entries(source_url, 1, source_end_rev, get_changed_paths=False)
-            for source_start_log in it_log_start:
-                break
-            if not source_start_log:
-                raise InternalError("Unable to find first revision for source_url: %s" % source_url)
+        # Get the first log entry at/after source_start_rev, which is where
+        # we'll do the initial import from.
+        it_log_start = svnclient.iter_svn_log_entries(source_url, source_start_rev, source_end_rev, get_changed_paths=False)
+        for source_start_log in it_log_start:
+            break
+        if not source_start_log:
+            raise InternalError("Unable to find any matching revisions between %s:%s in source_url: %s" % \
+                (source_start_rev, source_end_rev, source_url))
 
         # This is the revision we will start from for source_url
         source_start_rev = source_rev = int(source_start_log['revision'])
@@ -740,8 +740,13 @@ def main():
     #parser.remove_option("--help")
     #parser.add_option("-h", "--help", dest="show_help", action="store_true",
     #    help="show this help message and exit")
-    parser.add_option("-r", "--revision", type="int", dest="svn_rev", metavar="REV",
-                      help="initial SVN revision to start source_url replay")
+    parser.add_option("-r", "--revision", type="string", dest="svn_rev", metavar="ARG",
+                      help="revision range to replay from source_url\n" + \
+                           "A revision argument can be one of:\n" + \
+                           "   START        start rev # (end will be 'HEAD')\n" + \
+                           "   START:END    start and ending rev #'s\n" + \
+                           "(Any revision # formats which SVN understands\n" + \
+                           " are supported, e.g. 'HEAD', '{2010-01-31}', etc.)")
     parser.add_option("-a", "--keep-author", action="store_true", dest="keep_author", default=False,
                       help="maintain original 'Author' info from source repo")
     parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
@@ -764,6 +769,12 @@ def main():
     if options.dry_run:
         # When in dry-run mode, only try to process the next log_entry
         options.entries_proc_limit = 1
+    options.svn_rev_start = None
+    options.svn_rev_end   = None
+    if options.svn_rev:
+        rev = options.svn_rev.split(":")
+        options.svn_rev_start = rev[0] if len(rev)>0 else None
+        options.svn_rev_end   = rev[1] if len(rev)>1 else None
     ui.update_config(options)
     return real_main(options, args)
 

@@ -191,6 +191,14 @@ def parse_svn_status_xml(xml_string, base_dir=None, ignore_externals=False):
         l.append(d)
     return l
 
+def get_svn_rev(svn_url_or_wc, rev_number):
+    """
+    Evaluate a given SVN revision pattern, to map it to a discrete rev #.
+    """
+    xml_string = run_svn(['info', '--xml', '-r', rev_number, svn_url_or_wc], fail_if_stderr=True)
+    info = parse_svn_info_xml(xml_string)
+    return info['revision']
+
 def get_svn_info(svn_url_or_wc, rev_number=None):
     """
     Get SVN information for the given URL or working copy, with an optionally
