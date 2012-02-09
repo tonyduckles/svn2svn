@@ -105,6 +105,27 @@ def gen_tracking_revprops(source_rev):
                 {'name':'svn2svn:source_rev',  'value':source_rev}]
     return revprops
 
+def sync_svn_props(source_url, source_rev, path_offset):
+    """
+    Carry-forward any unversioned properties from the source repo to the
+    target WC.
+    """
+    source_props = svnclient.get_all_props(source_url+"/"+path_offset,  source_rev)
+    target_props = svnclient.get_all_props(path_offset)
+    if 'svn:mergeinfo' in source_props:
+        # Never carry-forward "svn:mergeinfo"
+        del source_props['svn:mergeinfo']
+    for prop in target_props:
+        if prop not in source_props:
+            # Remove any properties which exist in target but not source
+            run_svn(["propdel", prop, path_offset])
+    for prop in source_props:
+        if prop not in target_props or \
+           source_props[prop] != target_props[prop]:
+            # Set/update any properties which exist in source but not target or
+            # whose value differs between source vs. target.
+            run_svn(["propset", prop, source_props[prop], path_offset])
+
 def in_svn(p, require_in_repo=False, prefix=""):
     """
     Check if a given file/folder is being tracked by Subversion.
@@ -396,9 +417,15 @@ def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom
                     ui.status(prefix + ">> do_svn_add: pre-copy: local path already exists: %s", path_offset, level=ui.DEBUG, color='GREEN')
                     run_svn(["remove", "--force", path_offset])
                 run_svn(["copy", "-r", tgt_rev, target_url+"/"+copyfrom_offset+"@"+str(tgt_rev), path_offset])
-                # Export the final version of this file/folder from the source repo, to make
-                # sure we're up-to-date.
-                add_path(export_paths, path_offset)
+                if is_dir:
+                    # Export the final verison of all files in this folder.
+                    add_path(export_paths, path_offset)
+                else:
+                    # Export the final verison of this file.
+                    run_svn(["export", "--force", "-r", source_rev,
+                             source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
+                # Copy SVN properties from source repo
+                sync_svn_props(source_url, source_rev, path_offset)
         else:
             ui.status(prefix + ">> do_svn_add: Skipped 'svn copy': %s", path_offset, level=ui.DEBUG, color='GREEN')
     else:
@@ -421,7 +448,8 @@ def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom
                          source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
             # If not already under version-control, then "svn add" this file/folder.
             run_svn(["add", "--parents", path_offset])
-        # TODO: Need to copy SVN properties from source repos
+        # Copy SVN properties from source repo
+        sync_svn_props(source_url, source_rev, path_offset)
     if is_dir:
         # For any folders that we process, process any child contents, so that we correctly
         # replay copies/replaces/etc.
@@ -536,18 +564,18 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
                     # Need to use in_svn here to handle cases where client committed the parent
                     # folder and each indiv sub-folder.
                     run_svn(["add", "--parents", path_offset])
-                # TODO: Need to copy SVN properties from source repos
+                # Copy SVN properties from source repo
+                sync_svn_props(source_url, source_rev, path_offset)
 
         elif action == 'D':
             run_svn(["remove", "--force", path_offset])
 
         elif action == 'M':
-            # TODO: Is "svn merge -c" correct here? Should this just be an "svn export" plus
-            #       proplist updating?
-            out = run_svn(["merge", "-c", source_rev, "--non-recursive",
-                     "--non-interactive", "--accept=theirs-full",
-                     source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
-            # TODO: If d['props'] == 'modified', then run code to clean-up/purge any newly-modified props?
+            if path_is_file:
+                run_svn(["export", "--force", "-N" , "-r", source_rev,
+                         source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
+            # Update SVN properties based on source repo
+            sync_svn_props(source_url, source_rev, path_offset)
 
         else:
             raise InternalError("Internal Error: process_svn_log_entry: Unhandled 'action' value: '%s'"
@@ -624,32 +652,46 @@ def real_main(options, args):
 
         # For the initial commit to the target URL, export all the contents from
         # the source URL at the start-revision.
-        paths = run_svn(["list", "-r", source_rev, source_url+"@"+str(source_rev)])
-        if len(paths)>1:
-            disp_svn_log_summary(svnclient.get_one_svn_log_entry(source_url, source_rev, source_rev))
-            ui.status("(Initial import)", level=ui.VERBOSE)
-            paths = paths.strip("\n").split("\n")
-            for path_raw in paths:
-                # For each top-level file/folder...
-                if not path_raw:
-                    continue
-                # Directories have a trailing slash in the "svn list" output
-                path_is_dir = True if path_raw[-1] == "/" else False
-                path = path_raw.rstrip('/') if path_is_dir else path_raw
-                if path_is_dir and not os.path.exists(path):
-                    os.makedirs(path)
-                ui.status(" A %s", source_url[len(source_repos_url):]+"/"+path, level=ui.VERBOSE)
-                run_svn(["export", "--force", "-r" , source_rev, source_url+"/"+path+"@"+str(source_rev), path])
-                run_svn(["add", path])
-            num_entries_proc += 1
-            target_revprops = gen_tracking_revprops(source_rev)   # Build source-tracking revprop's
-            target_rev = commit_from_svn_log_entry(source_start_log, options, target_revprops=target_revprops)
-            if target_rev:
-                # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
-                set_rev_map(source_rev, target_rev)
-                # Update our target working-copy, to ensure everything says it's at the new HEAD revision
-                run_svn(["update"])
-                commit_count += 1
+        disp_svn_log_summary(svnclient.get_one_svn_log_entry(source_url, source_rev, source_rev))
+        ui.status("(Initial import)", level=ui.VERBOSE)
+        # Export and add file-contents from source_url@source_start_rev
+        top_paths = run_svn(["list", "-r", source_rev, source_url+"@"+str(source_rev)])
+        top_paths = top_paths.strip("\n").split("\n")
+        for path in top_paths:
+            # For each top-level file/folder...
+            if not path:
+                continue
+            # Directories have a trailing slash in the "svn list" output
+            path_is_dir = True if path[-1] == "/" else False
+            path_offset = path.rstrip('/') if path_is_dir else path
+            if in_svn(path_offset, prefix="  "):
+                raise InternalError("Cannot replay history on top of pre-existing structure: %s" % source_url+"/"+path_offset)
+            if path_is_dir and not os.path.exists(path_offset):
+                os.makedirs(path_offset)
+            run_svn(["export", "--force", "-r" , source_rev, source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
+            run_svn(["add", path_offset])
+        # Update any properties on the newly added content
+        paths = run_svn(["list", "--recursive", "-r", source_rev, source_url+"@"+str(source_rev)])
+        paths = paths.strip("\n").split("\n")
+        sync_svn_props(source_url, source_rev, "")
+        for path in paths:
+            if not path:
+                continue
+            # Directories have a trailing slash in the "svn list" output
+            path_is_dir = True if path[-1] == "/" else False
+            path_offset = path.rstrip('/') if path_is_dir else path
+            ui.status(" A %s", source_url[len(source_repos_url):]+"/"+path_offset, level=ui.VERBOSE)
+            sync_svn_props(source_url, source_rev, path_offset)
+        # Commit the initial import
+        num_entries_proc += 1
+        target_revprops = gen_tracking_revprops(source_rev)   # Build source-tracking revprop's
+        target_rev = commit_from_svn_log_entry(source_start_log, options, target_revprops=target_revprops)
+        if target_rev:
+            # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
+            set_rev_map(source_rev, target_rev)
+            # Update our target working-copy, to ensure everything says it's at the new HEAD revision
+            run_svn(["update"])
+            commit_count += 1
     else:
         # Re-build the rev_map based on any already-replayed history in target_url
         build_rev_map(target_url, target_end_rev, source_info)

@@ -354,3 +354,62 @@ def get_svn_client_version():
         _svn_client_version = tuple(map(int, [x for x in raw.split('.')
                                               if x.isdigit()]))
     return _svn_client_version
+
+
+def parse_svn_propget_xml(xml_string):
+    """
+    Parse the XML output from an "svn propget" command and extract useful
+    information as a dict.
+    """
+    d = {}
+    xml_string = strip_forbidden_xml_chars(xml_string)
+    tree = ET.fromstring(xml_string)
+    prop = tree.find('.//property')
+    d['name'] = prop.get('name')
+    d['value'] = prop is not None and prop.text and prop.text.replace('\r\n', '\n').replace('\n\r', '\n').replace('\r', '\n') or ""
+    return d
+
+def parse_svn_proplist_xml(xml_string):
+    """
+    Parse the XML output from an "svn proplist" command and extract list
+    of property-names.
+    """
+    l = []
+    xml_string = strip_forbidden_xml_chars(xml_string)
+    tree = ET.fromstring(xml_string)
+    for prop in tree.findall('.//property'):
+        l.append(prop.get('name'))
+    return l
+
+def get_prop_value(svn_url_or_wc, prop_name, rev_number=None):
+    """
+    Get the value of a versioned property for the given path.
+    """
+    args = ['propget', '--xml']
+    url = str(svn_url_or_wc)
+    if rev_number:
+        args += ['-r', rev_number]
+        if not "@" in svn_url_or_wc:
+            url = "%s@%s" % (svn_url_or_wc, str(rev_number))
+    args += [prop_name, url]
+    xml_string = run_svn(args)
+    return parse_svn_propget_xml(xml_string)
+
+def get_all_props(svn_url_or_wc, rev_number=None):
+    """
+    Get the values of all versioned properties for the given path.
+    """
+    l = {}
+    args = ['proplist', '--xml']
+    url = str(svn_url_or_wc)
+    if rev_number:
+        args += ['-r', rev_number]
+        if not "@" in svn_url_or_wc:
+            url = "%s@%s" % (svn_url_or_wc, str(rev_number))
+    args += [url]
+    xml_string = run_svn(args)
+    props = parse_svn_proplist_xml(xml_string)
+    for prop_name in props:
+        d = get_prop_value(svn_url_or_wc, prop_name, rev_number)
+        l[d['name']] = d['value']
+    return l

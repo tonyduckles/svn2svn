@@ -15,7 +15,7 @@ svnadmin create $REPO
 echo ""
 
 ## svn2svn /
-#../svn2svn.py -a -v file://$PWD/_repo_ref file://$PWD/_repo_replay
+#../svn2svn.py -a $1 file://$PWD/_repo_ref file://$PWD/_repo_replay
 
 # svn2svn /trunk
 svn mkdir -q -m "Add /trunk" $REPOURL/trunk

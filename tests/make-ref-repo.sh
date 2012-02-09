@@ -43,10 +43,13 @@ mkdir -p $WC/Module/ProjectA
 echo "Module/ProjectA/FileA1.txt (Initial)" >> $WC/Module/ProjectA/FileA1.txt
 echo "Module/ProjectA/FileA2.txt (Initial)" >> $WC/Module/ProjectA/FileA2.txt
 svn -q add $WC/Module
+svn propset -q desc "FileA1.txt" $WC/Module/ProjectA/FileA1.txt
+svn propset -q desc "FileA2.txt" $WC/Module/ProjectA/FileA2.txt
 svn_commit "Initial population"
 
 # Test #1: Add new file
 # * Test simple copy-from branch
+# * Test propset
 BRANCH="$REPOURL/branches/test1"
 svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
@@ -54,6 +57,7 @@ show_last_commit
 mkdir -p $WC/Module/ProjectB
 echo "Module/ProjectB/FileB1.txt (Test 1)" >> $WC/Module/ProjectB/FileB1.txt
 svn add -q $WC/Module/ProjectB
+svn propset -q filename FileB1.txt $WC/Module/ProjectB/FileB1.txt
 svn_commit "Test 1: Add Module/ProjectB"
 svn switch -q $TRUNK
 svn merge -q $BRANCH
@@ -68,6 +72,7 @@ svn_commit ""
 # Test #2: Rename files
 # * Test rename support
 # * Test committing rename in two different branch commits: first deletion, then add
+# * Test props from copy-from file carry forward to target
 BRANCH="$REPOURL/branches/test2"
 svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
@@ -86,6 +91,7 @@ svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
 show_last_commit
 echo "Module/ProjectB/FileB2.txt (Test 3)" >> $WC/Module/ProjectB/FileB2.txt
+svn propset -q filename FileB2.txt $WC/Module/ProjectB/FileB2.txt
 svn_commit "Test 3: Verify Module/ProjectB/FileB2.txt"
 svn switch -q $TRUNK
 svn merge -q $BRANCH
@@ -108,6 +114,7 @@ svn_commit "Test 4: Replace Module/ProjectA/FileA1.txt"
 # Test #5: Rename files + folders
 # * Test rename support
 # * Create complex find-ancestors case, where files are renamed within a renamed folder on a branch
+# * Test propset and propdel
 BRANCH="$REPOURL/branches/test5"
 svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
@@ -115,7 +122,11 @@ show_last_commit
 svn mv -q Module/ProjectB Module/ProjectC
 svn mv -q Module/ProjectC/FileB1.txt Module/ProjectC/FileC1.txt
 echo "Module/ProjectC/FileC1.txt (Test 5)" >> $WC/Module/ProjectC/FileC1.txt
+svn propdel -q filename $WC/Module/ProjectC/FileC1.txt
+svn propset -q desc 'This is a long string
+broken on two lines...' $WC/Module/ProjectC/FileC1.txt
 svn mv -q Module/ProjectC/FileB2.txt Module/ProjectC/FileC2.txt
+svn propset -q filename FileC2.txt $WC/Module/ProjectC/FileC2.txt
 echo "Module/ProjectC/FileC2.txt (Test 5)" >> $WC/Module/ProjectC/FileC2.txt
 svn_commit "Test 5: Rename Module/ProjectB -> Module/ProjectC"
 svn switch -q $TRUNK

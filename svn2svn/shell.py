@@ -90,7 +90,7 @@ def shell_quote(s):
 def _run_raw_command(cmd, args, fail_if_stderr=False, no_fail=False):
     cmd_string = "%s %s" % (cmd,  " ".join(map(shell_quote, args)))
     color = 'BLUE_B'
-    if cmd == 'svn' and args[0] in ['status', 'st', 'log', 'info', 'list', 'propset', 'update', 'up', 'cleanup', 'revert']:
+    if cmd == 'svn' and args[0] in ['status', 'st', 'log', 'info', 'list', 'proplist', 'propget', 'update', 'up', 'cleanup', 'revert']:
         # Show status-only commands (commands which make no changes to WC) in dim-blue
         color = 'BLUE'
     ui.status("$ %s", cmd_string, level=ui.EXTRA, color=color)
