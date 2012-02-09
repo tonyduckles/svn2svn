@@ -79,7 +79,7 @@ def _get_kind(svn_repos_url, svn_path, svn_rev, action, paths):
         parents = []
         for p in paths:
             # Build a list of any copy-from's in this log_entry that we're a child of.
-            if p['copyfrom_revision'] and svn_path.startswith(p['path']):
+            if p['kind'] == 'dir' and p['copyfrom_revision'] and svn_path.startswith(p['path']+"/"):
                 parents.append(p['path'])
         if parents:
             # Use the nearest copy-from'd parent
@@ -87,7 +87,7 @@ def _get_kind(svn_repos_url, svn_path, svn_rev, action, paths):
             parent = parents[len(parents)-1]
             for p in paths:
                 if parent == p['path']:
-                    info_path = p['copyfrom_path']
+                    info_path = info_path.replace(p['path'], p['copyfrom_path'])
                     info_rev =  p['copyfrom_revision']
         else:
             # If no parent copy-from's, then we should be able to check this path in
