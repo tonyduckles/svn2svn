@@ -127,6 +127,9 @@ def in_svn(p, require_in_repo=False, prefix=""):
     ui.status(prefix + ">> in_svn('%s', require_in_repo=%s) --> %s", p, str(require_in_repo), str(ret), level=ui.DEBUG, color='GREEN')
     return ret
 
+def is_child_path(path, p_path):
+    return True if (path == p_path) or (path.startswith(p_path+"/")) else False
+
 def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix = ""):
     """
     Given a source path, walk the SVN history backwards to inspect the ancestory of
@@ -165,8 +168,8 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
             break
         # If we found a copy-from case which matches our base_path, we're done.
         # ...but only if we've at least tried to search for the first copy-from path.
-        if first_iter_done and working_path.startswith(base_path):
-            ui.status(prefix + ">> find_svn_ancestors: Done: Found working_path.startswith(base_path) and first_iter_done=True", level=ui.DEBUG, color='YELLOW')
+        if first_iter_done and is_child_path(working_path, base_path):
+            ui.status(prefix + ">> find_svn_ancestors: Done: Found is_child_path(working_path, base_path) and first_iter_done=True", level=ui.DEBUG, color='YELLOW')
             done = True
             break
         first_iter_done = True
@@ -306,7 +309,7 @@ def get_svn_dirlist(svn_path, svn_rev = ""):
 
 def path_in_list(paths, path):
     for p in paths:
-        if path.startswith(p):
+        if is_child_path(path, p):
             return True
     return False
 
@@ -373,7 +376,7 @@ def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom
             ui.status(prefix + "   copyfrom: %s", copyfrom_path+"@"+str(copyfrom_rev), level=ui.DEBUG, color='GREEN')
             ui.status(prefix + " p_copyfrom: %s", parent_copyfrom_path+"@"+str(parent_copyfrom_rev) if parent_copyfrom_path else "", level=ui.DEBUG, color='GREEN')
             if path_in_svn and \
-               ((parent_copyfrom_path and copyfrom_path.startswith(parent_copyfrom_path)) and \
+               ((parent_copyfrom_path and is_child_path(copyfrom_path, parent_copyfrom_path)) and \
                 (parent_copyfrom_rev and copyfrom_rev == parent_copyfrom_rev)):
                 # When being called recursively, if this child entry has the same ancestor as the
                 # the parent, then no need to try to run another "svn copy".
@@ -460,10 +463,9 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
         # Get the full path for this changed_path
         # e.g. '/branches/bug123/projectA/file1.txt'
         path = d['path']
-        if not path.startswith(source_base + "/"):
+        if not is_child_path(path, source_base):
             # Ignore changed files that are not part of this subdir
-            if path != source_base:
-                ui.status(prefix + ">> process_svn_log_entry: Unrelated path: %s  (base: %s)", path, source_base, level=ui.DEBUG, color='GREEN')
+            ui.status(prefix + ">> process_svn_log_entry: Unrelated path: %s  (base: %s)", path, source_base, level=ui.DEBUG, color='GREEN')
             continue
         # Note: d['kind']="" for action="M" paths which only have property changes.
         path_is_dir =  True if d['kind'] == 'dir'  else False
@@ -484,7 +486,7 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
         # Try to be efficient and keep track of an explicit list of paths in the
         # working copy that changed. If we commit from the root of the working copy,
         # then SVN needs to crawl the entire working copy looking for pending changes.
-        add_path(commit_paths, path_offset)
+        commit_paths.append(path_offset)
 
         # Special-handling for replace's
         if action == 'R':
@@ -500,7 +502,7 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
         if action == 'A':
             # Determine where to export from.
             svn_copy = False
-            # Handle cases where this "add" was a copy from another URL in the source repos
+            # Handle cases where this "add" was a copy from another URL in the source repo
             if d['copyfrom_revision']:
                 copyfrom_path = d['copyfrom_path']
                 copyfrom_rev =  d['copyfrom_revision']
@@ -571,9 +573,9 @@ def real_main(options, args):
 
     # Make sure that both the source and target URL's are valid
     source_info = svnclient.get_svn_info(source_url)
-    assert source_url.startswith(source_info['repos_url'])
+    assert is_child_path(source_url, source_info['repos_url'])
     target_info = svnclient.get_svn_info(target_url)
-    assert target_url.startswith(target_info['repos_url'])
+    assert is_child_path(target_url, target_info['repos_url'])
 
     # Init global vars
     global source_repos_url,source_base,source_repos_uuid
@@ -598,6 +600,7 @@ def real_main(options, args):
         shutil.rmtree(wc_target)
         wc_exists = False
     if not wc_exists:
+        ui.status("Checking-out _wc_target...", level=ui.VERBOSE)
         svnclient.svn_checkout(target_url, wc_target)
     os.chdir(wc_target)
 
