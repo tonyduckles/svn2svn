@@ -339,7 +339,7 @@ def add_path(paths, path):
         paths.append(path)
 
 def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom_rev="", \
-               export_paths={}, is_dir = False, prefix = ""):
+               export_paths={}, is_dir = False, skip_paths=[], prefix = ""):
     """
     Given the add'd source path, replay the "svn add/copy" commands to correctly
     track renames across copy-from's.
@@ -453,10 +453,10 @@ def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom
     if is_dir:
         # For any folders that we process, process any child contents, so that we correctly
         # replay copies/replaces/etc.
-        do_svn_add_dir(path_offset, source_rev, copyfrom_path, copyfrom_rev, export_paths, prefix+"  ")
+        do_svn_add_dir(path_offset, source_rev, copyfrom_path, copyfrom_rev, export_paths, skip_paths, prefix+"  ")
 
 def do_svn_add_dir(path_offset, source_rev, parent_copyfrom_path, parent_copyfrom_rev, \
-                   export_paths, prefix=""):
+                   export_paths, skip_paths, prefix=""):
     # Get the directory contents, to compare between the local WC (target_url) vs. the remote repo (source_url)
     # TODO: paths_local won't include add'd paths because "svn ls" lists the contents of the
     #       associated remote repo folder. (Is this a problem?)
@@ -468,8 +468,9 @@ def do_svn_add_dir(path_offset, source_rev, parent_copyfrom_path, parent_copyfro
     for path in paths_remote:
         path_is_dir = True if path[-1] == "/" else False
         working_path = path_offset+"/"+(path.rstrip('/') if path_is_dir else path)
-        do_svn_add(working_path, source_rev, parent_copyfrom_path, parent_copyfrom_rev,
-                   export_paths, path_is_dir, prefix+"  ")
+        if not working_path in skip_paths:
+            do_svn_add(working_path, source_rev, parent_copyfrom_path, parent_copyfrom_rev,
+                       export_paths, path_is_dir, skip_paths, prefix+"  ")
     # Remove files/folders which exist in local but not remote
     for path in paths_local:
         if not path in paths_remote:
@@ -525,7 +526,13 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
             # then we need to run the "svn rm" first, then change action='A'. This
             # lets the normal code below handle re-"svn add"'ing the files. This
             # should replicate the "replace".
-            run_svn(["remove", "--force", path_offset])
+            if in_svn(path_offset):
+                # Target path might not be under version-control yet, e.g. parent "add"
+                # was a copy-from a branch which had no ancestry back to trunk, and each
+                # child folder under that parent folder is a "replace" action on the final
+                # merge to trunk. Since the child folders will be in skip_paths, do_svn_add
+                # wouldn't have created them while processing the parent "add" path.
+                run_svn(["remove", "--force", path_offset])
             action = 'A'
 
         # Handle all the various action-types
@@ -537,7 +544,16 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
             if d['copyfrom_revision']:
                 copyfrom_path = d['copyfrom_path']
                 copyfrom_rev =  d['copyfrom_revision']
-                do_svn_add(path_offset, source_rev, "", "", export_paths, path_is_dir, prefix+"  ")
+                skip_paths = []
+                for tmp_d in log_entry['changed_paths']:
+                    tmp_path = tmp_d['path']
+                    if is_child_path(tmp_path, path):
+                        # Build list of child entries which are also in the changed_paths list,
+                        # so that do_svn_add() can skip processing these entries when recursing
+                        # since we'll end-up processing them later.
+                        tmp_path_offset = tmp_path[len(source_base):].strip("/")
+                        skip_paths.append(tmp_path_offset)
+                do_svn_add(path_offset, source_rev, "", "", export_paths, path_is_dir, skip_paths, prefix+"  ")
             # Else just "svn export" the files from the source repo and "svn add" them.
             else:
                 # Create (parent) directory if needed
