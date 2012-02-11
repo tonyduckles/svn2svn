@@ -27,8 +27,9 @@ source_base = ""         # Relative path of source_url in source SVN repo, e.g. 
 source_repos_uuid = ""   # UUID of source SVN repo
 target_url =""           # URL to target path in target SVN repo, e.g. 'file:///svn/repo_target/trunk'
 rev_map = {}             # The running mapping-table dictionary for source_url rev #'s -> target_url rev #'s
+options = None           # optparser options
 
-def commit_from_svn_log_entry(log_entry, options, commit_paths=None, target_revprops=None):
+def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None):
     """
     Given an SVN log entry and an optional list of changed paths, do an svn commit.
     """
@@ -479,7 +480,7 @@ def do_svn_add_dir(path_offset, source_rev, parent_copyfrom_path, parent_copyfro
             # TODO: Does this handle deleted folders too? Wouldn't want to have a case
             #       where we only delete all files from folder but leave orphaned folder around.
 
-def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
+def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
     """
     Process SVN changes from the given log entry. Build an array (commit_paths)
     of the paths in the working-copy that were changed, i.e. the paths which
@@ -496,8 +497,10 @@ def process_svn_log_entry(log_entry, options, commit_paths, prefix = ""):
             # Ignore changed files that are not part of this subdir
             ui.status(prefix + ">> process_svn_log_entry: Unrelated path: %s  (base: %s)", path, source_base, level=ui.DEBUG, color='GREEN')
             continue
-        # Note: d['kind']="" for action="M" paths which only have property changes.
         if d['kind'] == "":
+            # The "kind" value was introduced in SVN 1.6, and "svn log --xml" won't return a "kind"
+            # value for commits made on a pre-1.6 repo, even if the server is now running 1.6.
+            # We need to use other methods to fetch the node-kind for these cases.
             d['kind'] = svnclient.get_kind(source_repos_url, path, source_rev, d['action'], log_entry['changed_paths'])
         assert (d['kind'] == 'file') or (d['kind'] == 'dir')
         path_is_dir =  True if d['kind'] == 'dir'  else False
@@ -612,7 +615,7 @@ def disp_svn_log_summary(log_entry):
     ui.status(log_entry['message'])
     ui.status("------------------------------------------------------------------------")
 
-def real_main(options, args):
+def real_main(args, parser):
     global source_url, target_url, rev_map
     source_url = args.pop(0).rstrip("/")    # e.g. 'http://server/svn/source/trunk'
     target_url = args.pop(0).rstrip("/")    # e.g. 'file:///svn/target/trunk'
@@ -701,7 +704,7 @@ def real_main(options, args):
         # Commit the initial import
         num_entries_proc += 1
         target_revprops = gen_tracking_revprops(source_rev)   # Build source-tracking revprop's
-        target_rev = commit_from_svn_log_entry(source_start_log, options, target_revprops=target_revprops)
+        target_rev = commit_from_svn_log_entry(source_start_log, target_revprops=target_revprops)
         if target_rev:
             # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
             set_rev_map(source_rev, target_rev)
@@ -734,11 +737,11 @@ def real_main(options, args):
             source_rev = log_entry['revision']
             # Process all the changed-paths in this log entry
             commit_paths = []
-            process_svn_log_entry(log_entry, options, commit_paths)
+            process_svn_log_entry(log_entry, commit_paths)
             num_entries_proc += 1
             # Commit any changes made to _wc_target
             target_revprops = gen_tracking_revprops(source_rev)   # Build source-tracking revprop's
-            target_rev = commit_from_svn_log_entry(log_entry, options, commit_paths, target_revprops=target_revprops)
+            target_rev = commit_from_svn_log_entry(log_entry, commit_paths, target_revprops=target_revprops)
             if target_rev:
                 # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
                 source_rev = log_entry['revision']
@@ -824,6 +827,7 @@ def main():
                       help="enable additional output (use -vv or -vvv for more)")
     parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
                       help="enable debugging output (same as -vvv)")
+    global options
     options, args = parser.parse_args()
     if len(args) != 2:
         parser.error("incorrect number of arguments")
@@ -840,7 +844,7 @@ def main():
         options.svn_rev_start = rev[0] if len(rev)>0 else None
         options.svn_rev_end   = rev[1] if len(rev)>1 else None
     ui.update_config(options)
-    return real_main(options, args)
+    return real_main(args, parser)
 
 
 if __name__ == "__main__":
