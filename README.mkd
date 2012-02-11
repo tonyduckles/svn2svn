@@ -4,22 +4,22 @@ Replicate (replay) changesets from one Subversion repository to another.
 
 Features
 --------
-- Meant for replaying history into an **empty** target location. This could be
-  an empty target repo or simply a brand-new folder/branch in the target repo.
-- Maintains logical history (when possible), e.g. uses "svn copy" for renames.
-- Maintains original commit messages.
-- Optionally maintain source commit authors (`svn:author`). (*Requires non-authenticated
+- **Meant for replaying history into an "empty target location**. This could be
+  an empty target repo or simply an empty folder/branch in the target repo.
+- **Maintains logical history (when possible)**, e.g. uses "svn copy" for renames.
+- **Maintains original commit messages**.
+- **Optionally maintain source commit authors (`svn:author`)**. Requires non-authenticated
   access to the target repo, since this relies upon the `--username` SVN
-  command-line arg.*)
-- Optionally maintain source commit timestamps (`svn:date`). (*Requires a
+  command-line arg.
+- **Optionally maintain source commit timestamps (`svn:date`)**. Requires a
   "pre-revprop-change" hook script in the target repo, to be able to change
-  the "`svn:date`" revprops after target commits have been made.*)
-- Optionally maintain identical revision #'s between source vs. target repo.
-  (*Effectively requires that you're replaying into an empty target repo,
-  or rather that the first source_url revision to be replayed is less than
-  the last target_url revision. Create blank "padding" revisions in the target
-  repo as needed.*)
-- Optionally run an external shell script before each replayed commit
+  the "`svn:date`" revprops after target commits have been made.
+- **Optionally maintain identical revision #'s between source vs. target repo**.
+  Effectively requires that you're replaying into an empty target repo,
+  or rather that the first source repo revision to be replayed is less than
+  the last target repo revision. Create blank "padding" revisions in the target
+  repo as needed.
+- **Optionally run an external shell script before each replayed commit**,
   to give the ability to dynamically exclude or modify files as part
   of the replay.
 
@@ -38,9 +38,34 @@ history into a new repository, so that things like "svn log" and "svn blame"
 will still show the correct (logical) history/ancestry, even though we end-up
 generating new commits which will have newer commit-dates and revision #'s.
 
+While this replay will obviously run faster if you're running between both
+a local source and target repositories, none of this *requires* direct
+access to the repo server. You could access both the source and target repo's
+over standard `http://`, `ssh://`, etc. methods.
+
 Usage
 -----
 See `svn2svn.py --help`
+
+Side Effects
+------------
+- The source repo is treated as strictly read-only. We do log/info/export/etc.
+  actions from the source repo, to get the history to replay and to get the
+  file contents at each step along teh way.
+- You must have commit access to the target repo. Additionally, for some of
+  the optional command-line args, you'll need access to the target repo to
+  setup hook scripts, e.g. "pre-revprop-change".
+- This script will create some folders off of your current working directory:
+  - "`_wc_target`": This is the checkout of the target\_url, where we replay
+    actions into and where we commit to the target repo. You can safely
+    remove this directory after a run, and the script will do a fresh
+    "svn checkout" (if needed) when starting the next time.
+  - "`_tmp_wc_target`": This is a temporary folder, which will only be created
+    if using `--keep-revnum` mode and it should only exist for brief periods
+    of time. This is where we commit dummy/padding revisions to the target repo,
+    checking out the root folder of the target repo and modifying a
+    "`svn2svn:keep-revnum`" property, i.e. a small change to trigger a commit
+    and in a location that will likely go un-noticed in the final target repo.
 
 Examples
 --------
