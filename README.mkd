@@ -8,11 +8,17 @@ Features
   an empty target repo or simply a brand-new folder/branch in the target repo.
 - Maintains logical history (when possible), e.g. uses "svn copy" for renames.
 - Maintains original commit messages.
-    - Optionally maintain source author info. (Only supported if target SVN
-      repo doesn't require auth, since this relies upon the `--username`
-      command-line arg.)
-    - **Note:** Cannot maintain original commit date, but appends original
-      commit date for each commit message: "Date: %d".
+- Optionally maintain source commit authors (`svn:author`). (*Requires non-authenticated
+  access to the target repo, since this relies upon the `--username` SVN
+  command-line arg.*)
+- Optionally maintain source commit timestamps (`svn:date`). (*Requires a
+  "pre-revprop-change" hook script in the target repo, to be able to change
+  the "`svn:date`" revprops after target commits have been made.*)
+- Optionally maintain identical revision #'s between source vs. target repo.
+  (*Effectively requires that you're replaying into an empty target repo,
+  or rather that the first source_url revision to be replayed is less than
+  the last target_url revision. Create blank "padding" revisions in the target
+  repo as needed.*)
 - Optionally run an external shell script before each replayed commit
   to give the ability to dynamically exclude or modify files as part
   of the replay.
