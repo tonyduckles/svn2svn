@@ -16,6 +16,7 @@ import traceback
 import shutil
 import operator
 import optparse
+import re
 from datetime import datetime
 
 _valid_svn_actions = "MARD"   # The list of known SVN action abbr's, from "svn log"
@@ -634,8 +635,15 @@ def real_main(args, parser):
     source_repos_uuid = source_info['repos_uuid']
 
     # Init start and end revision
-    source_start_rev = svnclient.get_svn_rev(source_repos_url, options.svn_rev_start if options.svn_rev_start else 1)
-    source_end_rev   = svnclient.get_svn_rev(source_repos_url, options.svn_rev_end   if options.svn_rev_end   else "HEAD")
+    try:
+        source_start_rev = svnclient.get_svn_rev(source_repos_url, options.rev_start if options.rev_start else 1)
+    except ExternalCommandFailed:
+        parser.error("invalid start source revision value: %s" % (options.rev_start))
+    try:
+        source_end_rev   = svnclient.get_svn_rev(source_repos_url, options.rev_end   if options.rev_end   else "HEAD")
+    except ExternalCommandFailed:
+        parser.error("invalid end source revision value: %s" % (options.rev_end))
+    ui.status("Using source revision range %s:%s", source_start_rev, source_end_rev, level=ui.VERBOSE)
 
     target_end_rev = target_info['revision']   # Last revision # in the target repo
     wc_target = os.path.abspath('_wc_target')
@@ -837,12 +845,19 @@ def main():
     if options.dry_run:
         # When in dry-run mode, only try to process the next log_entry
         options.entries_proc_limit = 1
-    options.svn_rev_start = None
-    options.svn_rev_end   = None
-    if options.svn_rev:
-        rev = options.svn_rev.split(":")
-        options.svn_rev_start = rev[0] if len(rev)>0 else None
-        options.svn_rev_end   = rev[1] if len(rev)>1 else None
+    options.rev_start = None
+    options.rev_end   = None
+    if options.revision:
+        # Reg-ex for matching a revision arg (http://svnbook.red-bean.com/en/1.5/svn.tour.revs.specifiers.html#svn.tour.revs.dates)
+        rev_patt = '[0-9A-Z]+|\{[0-9A-Za-z/\\ :-]+\}'
+        rev = None
+        match = re.match('^('+rev_patt+'):('+rev_patt+')$', options.revision)  # First try start:end match
+        if match is None: match = re.match('^('+rev_patt+')$', options.revision)   # Next, try start match
+        if match is None:
+            parser.error("unexpected --revision argument format; see 'svn help log' for valid revision formats")
+        rev = match.groups()
+        options.rev_start = rev[0] if len(rev)>0 else None
+        options.rev_end   = rev[1] if len(rev)>1 else None
     ui.update_config(options)
     return real_main(args, parser)
 
