@@ -117,10 +117,8 @@ def parse_svn_log_xml(xml_string):
         date = entry.find('date')
         msg = entry.find('msg')
         d['author'] = author is not None and author.text or "No author"
-        if date is not None:
-            d['date'] = svn_date_to_timestamp(date.text)
-        else:
-            d['date'] = None
+        d['date_raw'] = date.text if date is not None else None
+        d['date'] = svn_date_to_timestamp(date.text) if date is not None else None
         d['message'] = msg is not None and msg.text and msg.text.replace('\r\n', '\n').replace('\n\r', '\n').replace('\r', '\n') or ""
         paths = []
         for path in entry.findall('.//paths/path'):

@@ -45,10 +45,14 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
     # Uncomment this one one if you prefer UTC commit times
     #svn_date = "%d 0" % timestamp
     args = ["commit", "--force-log"]
+    message = log_entry['message']
+    if options.log_date:
+        message += "\nDate: " + svn_date
+    if options.log_author:
+        message += "\nAuthor: " + log_entry['author']
     if options.keep_author:
-        args += ["-m", log_entry['message'] + "\nDate: " + svn_date, "--username", log_entry['author']]
-    else:
-        args += ["-m", log_entry['message'] + "\nDate: " + svn_date + "\nAuthor: " + log_entry['author']]
+        args += ["--username", log_entry['author']]
+    args += ["-m", message]
     revprops = {}
     if log_entry['revprops']:
         # Carry forward any revprop's from the source revision
@@ -300,7 +304,7 @@ def build_rev_map(target_url, target_end_rev, source_info):
     """
     global rev_map
     rev_map = {}
-    ui.status("Rebuilding rev_map...", level=ui.VERBOSE)
+    ui.status("Rebuilding target_rev -> source_rev rev_map...", level=ui.VERBOSE)
     proc_count = 0
     it_log_entries = svnclient.iter_svn_log_entries(target_url, 1, target_end_rev, get_changed_paths=False, get_revprops=True)
     for log_entry in it_log_entries:
@@ -316,15 +320,15 @@ def build_rev_map(target_url, target_end_rev, source_info):
                 target_rev = log_entry['revision']
                 set_rev_map(source_rev, target_rev)
 
-def get_svn_dirlist(svn_path, svn_rev = ""):
+def get_svn_dirlist(svn_path, rev_number = ""):
     """
     Get a list of all the child contents (recusive) of the given folder path.
     """
     args = ["list"]
     path = svn_path
-    if svn_rev:
-        args += ["-r", svn_rev]
-        path += "@"+str(svn_rev)
+    if rev_number:
+        args += ["-r", rev_number]
+        path += "@"+str(rev_number)
     args += [path]
     paths = run_svn(args, no_fail=True)
     paths = paths.strip("\n").split("\n") if len(paths)>1 else []
@@ -426,8 +430,8 @@ def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom
                     # Export the final verison of this file.
                     run_svn(["export", "--force", "-r", source_rev,
                              source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
-                # Copy SVN properties from source repo
-                sync_svn_props(source_url, source_rev, path_offset)
+                if options.keep_prop:
+                    sync_svn_props(source_url, source_rev, path_offset)
         else:
             ui.status(prefix + ">> do_svn_add: Skipped 'svn copy': %s", path_offset, level=ui.DEBUG, color='GREEN')
     else:
@@ -450,8 +454,8 @@ def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom
                          source_repos_url+source_base+"/"+path_offset+"@"+str(source_rev), path_offset])
             # If not already under version-control, then "svn add" this file/folder.
             run_svn(["add", "--parents", path_offset])
-        # Copy SVN properties from source repo
-        sync_svn_props(source_url, source_rev, path_offset)
+        if options.keep_prop:
+            sync_svn_props(source_url, source_rev, path_offset)
     if is_dir:
         # For any folders that we process, process any child contents, so that we correctly
         # replay copies/replaces/etc.
@@ -584,8 +588,8 @@ def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
                     # Need to use in_svn here to handle cases where client committed the parent
                     # folder and each indiv sub-folder.
                     run_svn(["add", "--parents", path_offset])
-                # Copy SVN properties from source repo
-                sync_svn_props(source_url, source_rev, path_offset)
+                if options.keep_prop:
+                    sync_svn_props(source_url, source_rev, path_offset)
 
         elif action == 'D':
             run_svn(["remove", "--force", path_offset])
@@ -594,8 +598,8 @@ def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
             if path_is_file:
                 run_svn(["export", "--force", "-N" , "-r", source_rev,
                          source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
-            # Update SVN properties based on source repo
-            sync_svn_props(source_url, source_rev, path_offset)
+            if options.keep_prop:
+                sync_svn_props(source_url, source_rev, path_offset)
 
         else:
             raise InternalError("Internal Error: process_svn_log_entry: Unhandled 'action' value: '%s'"
@@ -608,13 +612,12 @@ def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
                      source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
 
 def disp_svn_log_summary(log_entry):
-    ui.status("")
+    ui.status("------------------------------------------------------------------------")
     ui.status("r%s | %s | %s",
         log_entry['revision'],
         log_entry['author'],
         str(datetime.fromtimestamp(int(log_entry['date'])).isoformat(' ')))
     ui.status(log_entry['message'])
-    ui.status("------------------------------------------------------------------------")
 
 def real_main(args, parser):
     global source_url, target_url, rev_map
@@ -644,6 +647,10 @@ def real_main(args, parser):
     except ExternalCommandFailed:
         parser.error("invalid end source revision value: %s" % (options.rev_end))
     ui.status("Using source revision range %s:%s", source_start_rev, source_end_rev, level=ui.VERBOSE)
+
+    # TODO: If options.keep_date, should we try doing a "svn propset" on an *existing* revision
+    #       as a sanity check, so we check if the pre-revprop-change hook script is correctly setup
+    #       before doing first replay-commit?
 
     target_end_rev = target_info['revision']   # Last revision # in the target repo
     wc_target = os.path.abspath('_wc_target')
@@ -676,6 +683,7 @@ def real_main(args, parser):
         # This is the revision we will start from for source_url
         source_start_rev = source_rev = int(source_start_log['revision'])
         ui.status("Starting at source revision %s.", source_start_rev, level=ui.VERBOSE)
+        ui.status("")
 
         # For the initial commit to the target URL, export all the contents from
         # the source URL at the start-revision.
@@ -700,7 +708,8 @@ def real_main(args, parser):
         # Update any properties on the newly added content
         paths = run_svn(["list", "--recursive", "-r", source_rev, source_url+"@"+str(source_rev)])
         paths = paths.strip("\n").split("\n")
-        sync_svn_props(source_url, source_rev, "")
+        if options.keep_prop:
+            sync_svn_props(source_url, source_rev, "")
         for path in paths:
             if not path:
                 continue
@@ -708,7 +717,8 @@ def real_main(args, parser):
             path_is_dir = True if path[-1] == "/" else False
             path_offset = path.rstrip('/') if path_is_dir else path
             ui.status(" A %s", source_url[len(source_repos_url):]+"/"+path_offset, level=ui.VERBOSE)
-            sync_svn_props(source_url, source_rev, path_offset)
+            if options.keep_prop:
+                sync_svn_props(source_url, source_rev, path_offset)
         # Commit the initial import
         num_entries_proc += 1
         target_revprops = gen_tracking_revprops(source_rev)   # Build source-tracking revprop's
@@ -723,10 +733,11 @@ def real_main(args, parser):
         # Re-build the rev_map based on any already-replayed history in target_url
         build_rev_map(target_url, target_end_rev, source_info)
         if not rev_map:
-            raise RuntimeError("Called with continue-mode, but no already-replayed history found in target repo: %s" % target_url)
+            parser.error("called with continue-mode, but no already-replayed source history found in target_url")
         source_start_rev = int(max(rev_map, key=rev_map.get))
         assert source_start_rev
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
+        ui.status("")
 
     svn_vers_t = svnclient.get_svn_client_version()
     svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
@@ -735,6 +746,9 @@ def real_main(args, parser):
     it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev, get_revprops=True) if source_start_rev < source_end_rev else []
     source_rev = None
 
+    # TODO: Now that commit_from_svn_log_entry() might try to do a "svn propset svn:date",
+    #       we might want some better KeyboardInterupt handilng here, to ensure that
+    #       commit_from_svn_log_entry() always runs as an atomic unit.
     try:
         for log_entry in it_log_entries:
             if options.entries_proc_limit:
@@ -782,13 +796,15 @@ def real_main(args, parser):
 
 def main():
     # Defined as entry point. Must be callable without arguments.
-    usage = "Usage: %prog [OPTIONS] source_url target_url"
+    usage = "svn2svn, version %s\n" % str(full_version) + \
+            "<http://nynim.org/projects/svn2svn> <https://github.com/tonyduckles/svn2svn>\n\n" + \
+            "Usage: %prog [OPTIONS] source_url target_url\n"
     description = """\
-  Replicate (replay) history from one SVN repository to another. Maintain
-  logical ancestry wherever possible, so that 'svn log' on the replayed
-  repo will correctly follow file/folder renames.
+Replicate (replay) history from one SVN repository to another. Maintain
+logical ancestry wherever possible, so that 'svn log' on the replayed repo
+will correctly follow file/folder renames.
 
-  == Examples ==
+Examples:
   Create a copy of only /trunk from source repo, starting at r5000
   $ svnadmin create /svn/target
   $ svn mkdir -m 'Add trunk' file:///svn/target/trunk
@@ -812,27 +828,37 @@ def main():
        logical ancestry where possible."""
     parser = optparse.OptionParser(usage, description=description,
                 formatter=HelpFormatter(), version="%prog "+str(full_version))
-    #parser.remove_option("--help")
-    #parser.add_option("-h", "--help", dest="show_help", action="store_true",
-    #    help="show this help message and exit")
-    parser.add_option("-r", "--revision", type="string", dest="svn_rev", metavar="ARG",
-                      help="revision range to replay from source_url\n" + \
-                           "A revision argument can be one of:\n" + \
-                           "   START        start rev # (end will be 'HEAD')\n" + \
-                           "   START:END    start and ending rev #'s\n" + \
-                           "(Any revision # formats which SVN understands\n" + \
-                           " are supported, e.g. 'HEAD', '{2010-01-31}', etc.)")
-    parser.add_option("-a", "--keep-author", action="store_true", dest="keep_author", default=False,
-                      help="maintain original 'Author' info from source repo")
-    parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
-                      help="continue from previous break")
-    parser.add_option("-l", "--limit", type="int", dest="entries_proc_limit", metavar="NUM",
-                      help="maximum number of log entries to process")
-    parser.add_option("-n", "--dry-run", action="store_true", dest="dry_run", default=False,
-                      help="try processing next log entry but don't commit changes to "
-                           "target working-copy (forces --limit=1)")
     parser.add_option("-v", "--verbose", dest="verbosity", action="count", default=1,
                       help="enable additional output (use -vv or -vvv for more)")
+    parser.add_option("-a", "--archive", action="store_true", dest="archive", default=False,
+                      help="archive/mirror mode; same as -UDP (see REQUIRE's below)\n"
+                           "maintain same commit author, same commit time, and file/dir properties")
+    parser.add_option("-U", "--keep-author", action="store_true", dest="keep_author", default=False,
+                      help="maintain same commit authors (svn:author) as source\n"
+                           "(REQUIRES target_url be non-auth'd, e.g. file://-based, since this uses --username to set author)")
+    parser.add_option("-D", "--keep-date", action="store_true", dest="keep_date", default=False,
+                      help="maintain same commit time (svn:date) as source\n"
+                           "(REQUIRES 'pre-revprop-change' hook script to allow 'svn:date' changes)")
+    parser.add_option("-P", "--keep-prop", action="store_true", dest="keep_prop", default=False,
+                      help="maintain same file/dir SVN properties as source")
+    parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
+                      help="continue from last source commit to target (based on svn2svn:* revprops)")
+    parser.add_option("-r", "--revision", type="string", dest="revision", metavar="ARG",
+                      help="revision range to replay from source_url\n"
+                           "A revision argument can be one of:\n"
+                           "   START        start rev # (end will be 'HEAD')\n"
+                           "   START:END    start and ending rev #'s\n"
+                           "Any revision # formats which SVN understands are "
+                           "supported, e.g. 'HEAD', '{2010-01-31}', etc.")
+    parser.add_option("-u", "--log-author", action="store_true", dest="log_author", default=False,
+                      help="append source commit author to replayed commit mesages")
+    parser.add_option("-d", "--log-date", action="store_true", dest="log_date", default=False,
+                      help="append source commit time to replayed commit messages")
+    parser.add_option("-l", "--limit", type="int", dest="entries_proc_limit", metavar="NUM",
+                      help="maximum number of source revisions to process")
+    parser.add_option("-n", "--dry-run", action="store_true", dest="dry_run", default=False,
+                      help="process next source revision but don't commit changes to "
+                           "target working-copy (forces --limit=1)")
     parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
                       help="enable debugging output (same as -vvv)")
     global options
@@ -858,6 +884,10 @@ def main():
         rev = match.groups()
         options.rev_start = rev[0] if len(rev)>0 else None
         options.rev_end   = rev[1] if len(rev)>1 else None
+    if options.archive:
+        options.keep_author = True
+        options.keep_date   = True
+        options.keep_prop   = True
     ui.update_config(options)
     return real_main(args, parser)
 

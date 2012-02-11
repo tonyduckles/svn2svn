@@ -61,3 +61,6 @@ class HelpFormatter(optparse.IndentedHelpFormatter):
         elif opts[-1] != "\n":
             result.append("\n")
         return "".join(result)
+
+    def format_usage(self, usage):
+        return usage
