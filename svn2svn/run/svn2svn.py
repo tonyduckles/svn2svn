@@ -30,6 +30,19 @@ target_url =""           # URL to target path in target SVN repo, e.g. 'file:///
 rev_map = {}             # The running mapping-table dictionary for source_url rev #'s -> target_url rev #'s
 options = None           # optparser options
 
+def parse_svn_commit_rev(output):
+    """
+    Parse the revision number from the output of "svn commit".
+    """
+    output_lines = output.strip("\n").split("\n")
+    rev_num = None
+    for line in output_lines:
+        if line[0:19] == 'Committed revision ':
+            rev_num = line[19:].rstrip('.')
+            break
+    assert rev_num is not None
+    return int(rev_num)
+
 def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None):
     """
     Given an SVN log entry and an optional list of changed paths, do an svn commit.
@@ -71,20 +84,16 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
             # those to the "svn commit" command. Else, pass nothing so we commit at
             # the root of the working-copy.
             args += list(commit_paths)
-    rev = None
+    rev_num = None
     if not options.dry_run:
         # Run the "svn commit" command, and screen-scrape the target_rev value (if any)
         output = run_svn(args)
-        if output:
-            output_lines = output.strip("\n").split("\n")
-            rev = ""
-            for line in output_lines:
-                if line[0:19] == 'Committed revision ':
-                    rev = line[19:].rstrip('.')
-                    break
-            if rev:
-                ui.status("Committed revision %s.", rev)
-    return rev
+        rev_num = parse_svn_commit_rev(output) if output else None
+        if rev_num is not None:
+            ui.status("Committed revision %s.", rev_num)
+            if options.keep_date:
+                run_svn(["propset", "--revprop", "-r", rev_num, "svn:date", log_entry['date_raw']])
+    return rev_num
 
 def full_svn_revert():
     """
@@ -652,8 +661,10 @@ def real_main(args, parser):
     #       as a sanity check, so we check if the pre-revprop-change hook script is correctly setup
     #       before doing first replay-commit?
 
-    target_end_rev = target_info['revision']   # Last revision # in the target repo
+    target_last_rev =  target_info['revision']   # Last revision # in the target repo
+    target_repos_url = target_info['repos_url']
     wc_target = os.path.abspath('_wc_target')
+    wc_target_tmp = os.path.abspath('_tmp_wc_target')
     num_entries_proc = 0
     commit_count = 0
     source_rev = None
@@ -729,15 +740,20 @@ def real_main(args, parser):
             # Update our target working-copy, to ensure everything says it's at the new HEAD revision
             run_svn(["update"])
             commit_count += 1
+            target_last_rev = target_rev
     else:
         # Re-build the rev_map based on any already-replayed history in target_url
-        build_rev_map(target_url, target_end_rev, source_info)
+        build_rev_map(target_url, target_last_rev, source_info)
         if not rev_map:
             parser.error("called with continue-mode, but no already-replayed source history found in target_url")
         source_start_rev = int(max(rev_map, key=rev_map.get))
         assert source_start_rev
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
         ui.status("")
+
+    if options.keep_revnum and source_start_rev < target_last_rev:
+        parser.error("last target revision is equal-or-higher than starting source revision; "
+                     "cannot use --keep-revnum mode")
 
     svn_vers_t = svnclient.get_svn_client_version()
     svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
@@ -755,8 +771,27 @@ def real_main(args, parser):
                 if num_entries_proc >= options.entries_proc_limit:
                     break
             # Replay this revision from source_url into target_url
-            disp_svn_log_summary(log_entry)
             source_rev = log_entry['revision']
+            if options.keep_revnum:
+                if int(source_rev) <= int(target_last_rev):
+                    raise InternalError("keep-revnum mode is enabled, "
+                        "but source revision (r%s) is less-than-or-equal last target revision (r%s)" % \
+                        (source_rev, target_last_rev))
+                if int(target_last_rev) < int(source_rev)-1:
+                    # Add "padding" target revisions to keep source and target rev #'s identical
+                    if os.path.exists(wc_target_tmp):
+                        shutil.rmtree(wc_target_tmp)
+                    run_svn(["checkout", "-r", "HEAD", "--depth=empty", target_repos_url, wc_target_tmp])
+                    for rev_num in range(int(target_last_rev)+1, int(source_rev)):
+                        run_svn(["propset", "svn2svn:keep-revnum", rev_num, wc_target_tmp])
+                        output = run_svn(["commit", "-m", "", wc_target_tmp])
+                        rev_num_tmp = parse_svn_commit_rev(output) if output else None
+                        assert rev_num == rev_num_tmp
+                        ui.status("Committed revision %s (keep-revnum).", rev_num)
+                        target_last_rev = rev_num
+                    shutil.rmtree(wc_target_tmp)
+                    run_svn(["update"])
+            disp_svn_log_summary(log_entry)
             # Process all the changed-paths in this log entry
             commit_paths = []
             process_svn_log_entry(log_entry, commit_paths)
@@ -768,6 +803,7 @@ def real_main(args, parser):
                 # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
                 source_rev = log_entry['revision']
                 set_rev_map(source_rev, target_rev)
+                target_last_rev = target_rev
                 # Update our target working-copy, to ensure everything says it's at the new HEAD revision
                 run_svn(["update"])
                 commit_count += 1
@@ -841,6 +877,9 @@ Examples:
                            "(REQUIRES 'pre-revprop-change' hook script to allow 'svn:date' changes)")
     parser.add_option("-P", "--keep-prop", action="store_true", dest="keep_prop", default=False,
                       help="maintain same file/dir SVN properties as source")
+    parser.add_option("-R", "--keep-revnum", action="store_true", dest="keep_revnum", default=False,
+                      help="maintain same rev #'s as source. creates placeholder target "
+                            "revisions (by modifying a 'svn2svn:keep-revnum' property at the root of the target repo)")
     parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
                       help="continue from last source commit to target (based on svn2svn:* revprops)")
     parser.add_option("-r", "--revision", type="string", dest="revision", metavar="ARG",
