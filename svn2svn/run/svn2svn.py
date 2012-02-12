@@ -181,9 +181,9 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
     'svn_repos_url' is the full URL to the root of the SVN repository,
       e.g. 'file:///path/to/repo'
     'base_path' is the path in the SVN repo to the target path we're trying to
-      trace ancestry back to, e.g. 'trunk'.
+      trace ancestry back to, e.g. '/trunk'.
     'source_path' is the path in the SVN repo to the source path to start checking
-      ancestry at, e.g. 'branches/fix1/projectA/file1.txt'.
+      ancestry at, e.g. '/branches/fix1/projectA/file1.txt'.
       (full_path = svn_repos_url+base_path+"/"+path_offset)
     'source_rev' is the revision to start walking the history of source_path backwards from.
     """
@@ -620,6 +620,32 @@ def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
             run_svn(["export", "--force", "-r", source_rev,
                      source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
 
+def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
+    """
+    Add "padding" target revisions as needed to keep source and target
+    revision #'s identical.
+    """
+    if int(source_rev) <= int(target_rev_last):
+        raise InternalError("keep-revnum mode is enabled, "
+            "but source revision (r%s) is less-than-or-equal last target revision (r%s)" % \
+            (source_rev, target_rev_last))
+    if int(target_rev_last) < int(source_rev)-1:
+        # Add "padding" target revisions to keep source and target rev #'s identical
+        if os.path.exists(wc_target_tmp):
+            shutil.rmtree(wc_target_tmp)
+        run_svn(["checkout", "-r", "HEAD", "--depth=empty", target_repos_url, wc_target_tmp])
+        for rev_num in range(int(target_rev_last)+1, int(source_rev)):
+            run_svn(["propset", "svn2svn:keep-revnum", rev_num, wc_target_tmp])
+            output = run_svn(["commit", "-m", "", wc_target_tmp])
+            rev_num_tmp = parse_svn_commit_rev(output) if output else None
+            assert rev_num == rev_num_tmp
+            ui.status("Committed revision %s (keep-revnum).", rev_num)
+            target_rev_last = rev_num
+        shutil.rmtree(wc_target_tmp)
+        # Update our target working-copy, to ensure everything says it's at the new HEAD revision
+        run_svn(["update"])
+    return target_rev_last
+
 def disp_svn_log_summary(log_entry):
     ui.status("------------------------------------------------------------------------")
     ui.status("r%s | %s | %s",
@@ -661,7 +687,7 @@ def real_main(args, parser):
     #       as a sanity check, so we check if the pre-revprop-change hook script is correctly setup
     #       before doing first replay-commit?
 
-    target_last_rev =  target_info['revision']   # Last revision # in the target repo
+    target_rev_last =  target_info['revision']   # Last revision # in the target repo
     target_repos_url = target_info['repos_url']
     wc_target = os.path.abspath('_wc_target')
     wc_target_tmp = os.path.abspath('_tmp_wc_target')
@@ -695,11 +721,12 @@ def real_main(args, parser):
         source_start_rev = source_rev = int(source_start_log['revision'])
         ui.status("Starting at source revision %s.", source_start_rev, level=ui.VERBOSE)
         ui.status("")
+        if options.keep_revnum:
+            target_rev_last = keep_revnum(source_rev, target_rev_last, wc_target_tmp)
 
         # For the initial commit to the target URL, export all the contents from
         # the source URL at the start-revision.
         disp_svn_log_summary(svnclient.get_one_svn_log_entry(source_url, source_rev, source_rev))
-        ui.status("(Initial import)", level=ui.VERBOSE)
         # Export and add file-contents from source_url@source_start_rev
         top_paths = run_svn(["list", "-r", source_rev, source_url+"@"+str(source_rev)])
         top_paths = top_paths.strip("\n").split("\n")
@@ -727,7 +754,7 @@ def real_main(args, parser):
             # Directories have a trailing slash in the "svn list" output
             path_is_dir = True if path[-1] == "/" else False
             path_offset = path.rstrip('/') if path_is_dir else path
-            ui.status(" A %s", source_url[len(source_repos_url):]+"/"+path_offset, level=ui.VERBOSE)
+            ui.status(" A %s", source_base+"/"+path_offset, level=ui.VERBOSE)
             if options.keep_prop:
                 sync_svn_props(source_url, source_rev, path_offset)
         # Commit the initial import
@@ -740,10 +767,10 @@ def real_main(args, parser):
             # Update our target working-copy, to ensure everything says it's at the new HEAD revision
             run_svn(["update"])
             commit_count += 1
-            target_last_rev = target_rev
+            target_rev_last = target_rev
     else:
         # Re-build the rev_map based on any already-replayed history in target_url
-        build_rev_map(target_url, target_last_rev, source_info)
+        build_rev_map(target_url, target_rev_last, source_info)
         if not rev_map:
             parser.error("called with continue-mode, but no already-replayed source history found in target_url")
         source_start_rev = int(max(rev_map, key=rev_map.get))
@@ -751,7 +778,7 @@ def real_main(args, parser):
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
         ui.status("")
 
-    if options.keep_revnum and source_start_rev < target_last_rev:
+    if options.keep_revnum and source_start_rev < target_rev_last:
         parser.error("last target revision is equal-or-higher than starting source revision; "
                      "cannot use --keep-revnum mode")
 
@@ -773,24 +800,7 @@ def real_main(args, parser):
             # Replay this revision from source_url into target_url
             source_rev = log_entry['revision']
             if options.keep_revnum:
-                if int(source_rev) <= int(target_last_rev):
-                    raise InternalError("keep-revnum mode is enabled, "
-                        "but source revision (r%s) is less-than-or-equal last target revision (r%s)" % \
-                        (source_rev, target_last_rev))
-                if int(target_last_rev) < int(source_rev)-1:
-                    # Add "padding" target revisions to keep source and target rev #'s identical
-                    if os.path.exists(wc_target_tmp):
-                        shutil.rmtree(wc_target_tmp)
-                    run_svn(["checkout", "-r", "HEAD", "--depth=empty", target_repos_url, wc_target_tmp])
-                    for rev_num in range(int(target_last_rev)+1, int(source_rev)):
-                        run_svn(["propset", "svn2svn:keep-revnum", rev_num, wc_target_tmp])
-                        output = run_svn(["commit", "-m", "", wc_target_tmp])
-                        rev_num_tmp = parse_svn_commit_rev(output) if output else None
-                        assert rev_num == rev_num_tmp
-                        ui.status("Committed revision %s (keep-revnum).", rev_num)
-                        target_last_rev = rev_num
-                    shutil.rmtree(wc_target_tmp)
-                    run_svn(["update"])
+                target_rev_last = keep_revnum(source_rev, target_rev_last, wc_target_tmp)
             disp_svn_log_summary(log_entry)
             # Process all the changed-paths in this log entry
             commit_paths = []
@@ -803,7 +813,7 @@ def real_main(args, parser):
                 # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
                 source_rev = log_entry['revision']
                 set_rev_map(source_rev, target_rev)
-                target_last_rev = target_rev
+                target_rev_last = target_rev
                 # Update our target working-copy, to ensure everything says it's at the new HEAD revision
                 run_svn(["update"])
                 commit_count += 1
@@ -812,8 +822,8 @@ def real_main(args, parser):
                     run_svn(["cleanup"])
         if not source_rev:
             # If there were no new source_url revisions to process, init source_rev
-            # for the "finally" message below.
-            source_rev = source_end_rev
+            # for the "finally" message below to be the last source revision replayed.
+            source_rev = source_start_rev
 
     except KeyboardInterrupt:
         print "\nStopped by user."
