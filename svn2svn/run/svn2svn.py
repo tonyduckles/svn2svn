@@ -213,7 +213,7 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
         changed_paths_temp = []
         for d in log_entry['changed_paths']:
             path = d['path']
-            if path in working_path:
+            if is_child_path(working_path, path):
                 changed_paths_temp.append({'path': path, 'data': d})
         if not changed_paths_temp:
             # If no matches, then we've hit the end of the chain and this path has no ancestry back to base_path.
@@ -295,8 +295,9 @@ def get_rev_map(source_rev, prefix):
     ui.status(prefix + ">> get_rev_map(%s)", source_rev, level=ui.DEBUG, color='GREEN')
     # Find the highest entry less-than-or-equal-to source_rev
     for rev in range(int(source_rev), 0, -1):
-        ui.status(prefix + ">> get_rev_map: rev=%s  in_rev_map=%s", rev, str(rev in rev_map), level=ui.DEBUG, color='BLACK_B')
-        if rev in rev_map:
+        in_rev_map = True if rev in rev_map else False
+        ui.status(prefix + ">> get_rev_map: rev=%s  in_rev_map=%s", rev, str(in_rev_map), level=ui.DEBUG, color='BLACK_B')
+        if in_rev_map:
             return int(rev_map[rev])
     # Else, we fell off the bottom of the rev_map. Ruh-roh...
     return None
@@ -328,6 +329,9 @@ def build_rev_map(target_url, target_end_rev, source_info):
                 source_rev = revprops['svn2svn:source_rev']
                 target_rev = log_entry['revision']
                 set_rev_map(source_rev, target_rev)
+                proc_count += 1
+                if proc_count % 500 == 0:
+                    ui.status("...processed %s (%s of %s)..." % (proc_count, target_rev, target_end_rev), level=ui.VERBOSE)
 
 def get_svn_dirlist(svn_path, rev_number = ""):
     """
