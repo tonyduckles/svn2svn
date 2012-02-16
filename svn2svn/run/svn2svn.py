@@ -671,6 +671,8 @@ def real_main(args, parser):
     source_repos_url = source_info['repos_url']       # e.g. 'http://server/svn/source'
     source_base = source_url[len(source_repos_url):]  # e.g. '/trunk'
     source_repos_uuid = source_info['repos_uuid']
+    global target_repos_url
+    target_repos_url = target_info['repos_url']
 
     # Init start and end revision
     try:
@@ -688,7 +690,6 @@ def real_main(args, parser):
     #       before doing first replay-commit?
 
     target_rev_last =  target_info['revision']   # Last revision # in the target repo
-    target_repos_url = target_info['repos_url']
     wc_target = os.path.abspath('_wc_target')
     wc_target_tmp = os.path.abspath('_tmp_wc_target')
     num_entries_proc = 0
@@ -721,7 +722,7 @@ def real_main(args, parser):
         source_start_rev = source_rev = int(source_start_log['revision'])
         ui.status("Starting at source revision %s.", source_start_rev, level=ui.VERBOSE)
         ui.status("")
-        if options.keep_revnum:
+        if options.keep_revnum and source_rev > target_rev_last:
             target_rev_last = keep_revnum(source_rev, target_rev_last, wc_target_tmp)
 
         # For the initial commit to the target URL, export all the contents from
