@@ -729,6 +729,11 @@ def real_main(args, parser):
         ui.status("Checking-out _wc_target...", level=ui.VERBOSE)
         svnclient.svn_checkout(target_url, wc_target)
     os.chdir(wc_target)
+    if wc_exists:
+        # If using an existing WC, make sure it's clean ("svn revert")
+        ui.status("Cleaning-up _wc_target...", level=ui.VERBOSE)
+        run_svn(["cleanup"])
+        full_svn_revert()
 
     if not options.cont_from_break:
         # TODO: Warn user if trying to start (non-continue) into a non-empty target path?
