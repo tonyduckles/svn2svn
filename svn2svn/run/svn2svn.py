@@ -303,7 +303,7 @@ def get_rev_map(source_rev, prefix):
     return None
 
 def set_rev_map(source_rev, target_rev):
-    ui.status(">> set_rev_map: source_rev=%s target_rev=%s", source_rev, target_rev, level=ui.DEBUG, color='GREEN')
+    #ui.status(">> set_rev_map: source_rev=%s target_rev=%s", source_rev, target_rev, level=ui.DEBUG, color='GREEN')
     global rev_map
     rev_map[int(source_rev)]=int(target_rev)
 
@@ -434,6 +434,7 @@ def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom
                 if path_in_svn:
                     # If local file is already under version-control, then this is a replace.
                     ui.status(prefix + ">> do_svn_add: pre-copy: local path already exists: %s", path_offset, level=ui.DEBUG, color='GREEN')
+                    run_svn(["update", path_offset])
                     run_svn(["remove", "--force", path_offset])
                 run_svn(["copy", "-r", tgt_rev, target_url+"/"+copyfrom_offset+"@"+str(tgt_rev), path_offset])
                 if is_dir:
@@ -494,6 +495,7 @@ def do_svn_add_dir(path_offset, source_rev, parent_copyfrom_path, parent_copyfro
     for path in paths_local:
         if not path in paths_remote:
             ui.status(" %s %s", 'D', source_base+"/"+path_offset+"/"+path, level=ui.VERBOSE)
+            run_svn(["update", path_offset+"/"+path])
             run_svn(["remove", "--force", path_offset+"/"+path])
             # TODO: Does this handle deleted folders too? Wouldn't want to have a case
             #       where we only delete all files from folder but leave orphaned folder around.
@@ -553,6 +555,10 @@ def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
                 # child folder under that parent folder is a "replace" action on the final
                 # merge to trunk. Since the child folders will be in skip_paths, do_svn_add
                 # wouldn't have created them while processing the parent "add" path.
+                if path_is_dir:
+                    # Need to "svn update" before "svn remove" in case child contents are at
+                    # a higher rev than the (parent) path_offset.
+                    run_svn(["update", path_offset])
                 run_svn(["remove", "--force", path_offset])
             action = 'A'
 
@@ -608,12 +614,24 @@ def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
                     sync_svn_props(source_url, source_rev, path_offset)
 
         elif action == 'D':
+            if path_is_dir:
+                # For dirs, need to "svn update" before "svn remove" because the final
+                # "svn commit" will fail if the parent (path_offset) is at a lower rev
+                # than any of the child contents. This needs to be a recursive update.
+                run_svn(["update", path_offset])
             run_svn(["remove", "--force", path_offset])
 
         elif action == 'M':
             if path_is_file:
                 run_svn(["export", "--force", "-N" , "-r", source_rev,
                          source_url+"/"+path_offset+"@"+str(source_rev), path_offset])
+            if path_is_dir:
+                # For dirs, need to "svn update" before export/prop-sync because the
+                # final "svn commit" will fail if the parent is at a lower rev than
+                # child contents. Just need to update the rev-state of the dir (d['path']),
+                # don't need to recursively update all child contents.
+                # (??? is this the right reason?)
+                run_svn(["update", "-N", path_offset])
             if options.keep_prop:
                 sync_svn_props(source_url, source_rev, path_offset)
 
@@ -649,8 +667,6 @@ def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
             ui.status("Committed revision %s (keep-revnum).", rev_num)
             target_rev_last = rev_num
         shutil.rmtree(wc_target_tmp)
-        # Update our target working-copy, to ensure everything says it's at the new HEAD revision
-        run_svn(["update"])
     return target_rev_last
 
 def disp_svn_log_summary(log_entry):
@@ -772,8 +788,6 @@ def real_main(args, parser):
         if target_rev:
             # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
             set_rev_map(source_rev, target_rev)
-            # Update our target working-copy, to ensure everything says it's at the new HEAD revision
-            run_svn(["update"])
             commit_count += 1
             target_rev_last = target_rev
     else:
@@ -822,8 +836,6 @@ def real_main(args, parser):
                 source_rev = log_entry['revision']
                 set_rev_map(source_rev, target_rev)
                 target_rev_last = target_rev
-                # Update our target working-copy, to ensure everything says it's at the new HEAD revision
-                run_svn(["update"])
                 commit_count += 1
                 # Run "svn cleanup" every 100 commits if SVN 1.7+, to clean-up orphaned ".svn/pristines/*"
                 if svn_vers >= 1.7 and (commit_count % 100 == 0):
