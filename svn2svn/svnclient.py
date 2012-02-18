@@ -155,8 +155,7 @@ def parse_svn_status_xml(xml_string, base_dir=None, ignore_externals=False):
     for entry in tree.findall('.//entry'):
         d = {}
         path = entry.get('path')
-        if base_dir is not None:
-            assert os.path.normcase(path).startswith(base_dir)
+        if base_dir is not None and os.path.normcase(path).startswith(base_dir):
             path = path[len(base_dir):].lstrip('/\\')
         d['path'] = path
         wc_status = entry.find('wc-status')
