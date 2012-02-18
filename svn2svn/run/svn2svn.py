@@ -515,7 +515,7 @@ def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
             # Ignore changed files that are not part of this subdir
             ui.status(prefix + ">> process_svn_log_entry: Unrelated path: %s  (base: %s)", path, source_base, level=ui.DEBUG, color='GREEN')
             continue
-        if d['kind'] == "":
+        if d['kind'] == "" or d['kind'] == 'none':
             # The "kind" value was introduced in SVN 1.6, and "svn log --xml" won't return a "kind"
             # value for commits made on a pre-1.6 repo, even if the server is now running 1.6.
             # We need to use other methods to fetch the node-kind for these cases.
@@ -568,10 +568,13 @@ def process_svn_log_entry(log_entry, commit_paths, prefix = ""):
                 skip_paths = []
                 for tmp_d in log_entry['changed_paths']:
                     tmp_path = tmp_d['path']
-                    if is_child_path(tmp_path, path):
+                    if is_child_path(tmp_path, path) and tmp_d['action'] in 'ARD':
                         # Build list of child entries which are also in the changed_paths list,
                         # so that do_svn_add() can skip processing these entries when recursing
-                        # since we'll end-up processing them later.
+                        # since we'll end-up processing them later. Don't include action="M" paths
+                        # in this list because it's non-conclusive: it could just mean that the
+                        # file was modified *after* the copy-from, so we still want do_svn_add()
+                        # to re-create the correct ancestry.
                         tmp_path_offset = tmp_path[len(source_base):].strip("/")
                         skip_paths.append(tmp_path_offset)
                 do_svn_add(path_offset, source_rev, "", "", export_paths, path_is_dir, skip_paths, prefix+"  ")
