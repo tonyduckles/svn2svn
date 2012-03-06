@@ -166,46 +166,47 @@ def in_svn(p, require_in_repo=False, prefix=""):
 def is_child_path(path, p_path):
     return True if (path == p_path) or (path.startswith(p_path+"/")) else False
 
-def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix = ""):
+def find_svn_ancestors(svn_repos_url, start_path, start_rev, stop_base_path="", prefix=""):
     """
-    Given a source path, walk the SVN history backwards to inspect the ancestory of
-    that path, seeing if it traces back to base_path.  Build an array of copyfrom_path
-    and copyfrom_revision pairs for each of the "svn copies". If we find a copyfrom_path
-    which base_path is a substring match of (e.g. we crawled back to the initial branch-
-    copy from trunk), then return the collection of ancestor paths.  Otherwise,
-    copyfrom_path has no ancestory compared to base_path.
+    Given an initial starting path+rev, walk the SVN history backwards to inspect the
+    ancestry of that path, optionally seeing if it traces back to stop_base_path.
+
+    Build an array of copyfrom_path and copyfrom_revision pairs for each of the "svn copy"'s.
+    If we find a copyfrom_path which stop_base_path is a substring match of (e.g. we crawled
+    back to the initial branch-copy from trunk), then return the collection of ancestor
+    paths.  Otherwise, copyfrom_path has no ancestry compared to stop_base_path.
 
     This is useful when comparing "trunk" vs. "branch" paths, to handle cases where a
     file/folder was renamed in a branch and then that branch was merged back to trunk.
 
     'svn_repos_url' is the full URL to the root of the SVN repository,
       e.g. 'file:///path/to/repo'
-    'base_path' is the path in the SVN repo to the target path we're trying to
-      trace ancestry back to, e.g. '/trunk'.
-    'source_path' is the path in the SVN repo to the source path to start checking
+    'start_path' is the path in the SVN repo to the source path to start checking
       ancestry at, e.g. '/branches/fix1/projectA/file1.txt'.
-      (full_path = svn_repos_url+base_path+"/"+path_offset)
-    'source_rev' is the revision to start walking the history of source_path backwards from.
+    'start_rev' is the revision to start walking the history of start_path backwards from.
+    'stop_base_path' is the path in the SVN repo to stop tracing ancestry once we've reached,
+      i.e. the target path we're trying to trace ancestry back to, e.g. '/trunk'.
     """
-    ui.status(prefix + ">> find_svn_ancestors: Start: (%s) source_path: %s  base_path: %s",
-        svn_repos_url, source_path+"@"+str(source_rev), base_path, level=ui.DEBUG, color='YELLOW')
+    ui.status(prefix + ">> find_svn_ancestors: Start: (%s) start_path: %s  stop_base_path: %s",
+        svn_repos_url, start_path+"@"+str(start_rev), stop_base_path, level=ui.DEBUG, color='YELLOW')
     done = False
-    working_path = base_path+"/"+source_path
-    working_rev  = source_rev
+    no_ancestry = False
+    cur_path = start_path
+    cur_rev  = start_rev
     first_iter_done = False
     ancestors_temp = []
     while not done:
-        # Get the first "svn log" entry for this path (relative to @rev)
-        ui.status(prefix + ">> find_svn_ancestors: %s", svn_repos_url + working_path+"@"+str(working_rev), level=ui.DEBUG, color='YELLOW')
-        log_entry = svnclient.get_first_svn_log_entry(svn_repos_url + working_path, 1, working_rev, True)
+        # Get the first "svn log" entry for cur_path (relative to @cur_rev)
+        ui.status(prefix + ">> find_svn_ancestors: %s", svn_repos_url+cur_path+"@"+str(cur_rev), level=ui.DEBUG, color='YELLOW')
+        log_entry = svnclient.get_first_svn_log_entry(svn_repos_url+cur_path, 1, cur_rev)
         if not log_entry:
             ui.status(prefix + ">> find_svn_ancestors: Done: no log_entry", level=ui.DEBUG, color='YELLOW')
             done = True
             break
-        # If we found a copy-from case which matches our base_path, we're done.
+        # If we found a copy-from case which matches our stop_base_path, we're done.
         # ...but only if we've at least tried to search for the first copy-from path.
-        if first_iter_done and is_child_path(working_path, base_path):
-            ui.status(prefix + ">> find_svn_ancestors: Done: Found is_child_path(working_path, base_path) and first_iter_done=True", level=ui.DEBUG, color='YELLOW')
+        if stop_base_path and first_iter_done and is_child_path(cur_path, stop_base_path):
+            ui.status(prefix + ">> find_svn_ancestors: Done: Found is_child_path(cur_path, stop_base_path) and first_iter_done=True", level=ui.DEBUG, color='YELLOW')
             done = True
             break
         first_iter_done = True
@@ -213,17 +214,18 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
         changed_paths_temp = []
         for d in log_entry['changed_paths']:
             path = d['path']
-            if is_child_path(working_path, path):
+            if is_child_path(cur_path, path):
                 changed_paths_temp.append({'path': path, 'data': d})
         if not changed_paths_temp:
-            # If no matches, then we've hit the end of the chain and this path has no ancestry back to base_path.
+            # If no matches, then we've hit the end of the ancestry-chain.
             ui.status(prefix + ">> find_svn_ancestors: Done: No matching changed_paths", level=ui.DEBUG, color='YELLOW')
             done = True
             continue
         # Reverse-sort any matches, so that we start with the most-granular (deepest in the tree) path.
         changed_paths = sorted(changed_paths_temp, key=operator.itemgetter('path'), reverse=True)
-        # Find the action for our working_path in this revision. Use a loop to check in reverse order,
-        # so that if the target file/folder is "M" but has a parent folder with an "A" copy-from.
+        # Find the action for our cur_path in this revision. Use a loop to check in reverse order,
+        # so that if the target file/folder is "M" but has a parent folder with an "A" copy-from
+        # then we still correctly match the deepest copy-from.
         for v in changed_paths:
             d = v['data']
             path = d['path']
@@ -236,15 +238,17 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
                 (" (from %s)" % (d['copyfrom_path']+"@"+str(d['copyfrom_revision']))) if d['copyfrom_path'] else "",
                 level=ui.DEBUG, color='YELLOW')
             if action == 'D':
-                # If file/folder was deleted, it has no ancestor
-                ancestors_temp = []
+                # If file/folder was deleted, ancestry-chain stops here
+                if stop_base_path:
+                    no_ancestry = True
                 ui.status(prefix + ">> find_svn_ancestors: Done: deleted", level=ui.DEBUG, color='YELLOW')
                 done = True
                 break
             if action in 'RA':
-                # If file/folder was added/replaced but not a copy, it has no ancestor
+                # If file/folder was added/replaced but not a copy, ancestry-chain stops here
                 if not d['copyfrom_path']:
-                    ancestors_temp = []
+                    if stop_base_path:
+                        no_ancestry = True
                     ui.status(prefix + ">> find_svn_ancestors: Done: %s with no copyfrom_path",
                         "Added" if action == "A" else "Replaced",
                         level=ui.DEBUG, color='YELLOW')
@@ -257,19 +261,24 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
                     level=ui.DEBUG, color='YELLOW')
                 ancestors_temp.append({'path': path, 'revision': log_entry['revision'],
                                        'copyfrom_path': d['copyfrom_path'], 'copyfrom_rev': d['copyfrom_revision']})
-                working_path = working_path.replace(d['path'], d['copyfrom_path'])
-                working_rev =  d['copyfrom_revision']
+                cur_path = cur_path.replace(d['path'], d['copyfrom_path'])
+                cur_rev =  d['copyfrom_revision']
                 # Follow the copy and keep on searching
                 break
     ancestors = []
+    if stop_base_path and no_ancestry:
+        # If we're tracing back ancestry to a specific target stop_base_path and
+        # the ancestry-chain stopped before we reached stop_base_path, then return
+        # nothing since there is no ancestry chaining back to that target.
+        ancestors_temp = []
     if ancestors_temp:
-        ancestors.append({'path': base_path+"/"+source_path, 'revision': source_rev})
-        working_path = base_path+"/"+source_path
+        ancestors.append({'path': start_path, 'revision': start_rev})
+        cur_path = start_path
         for idx in range(len(ancestors_temp)):
             d = ancestors_temp[idx]
-            working_path = working_path.replace(d['path'], d['copyfrom_path'])
-            working_rev =  d['copyfrom_rev']
-            ancestors.append({'path': working_path, 'revision': working_rev})
+            cur_path = cur_path.replace(d['path'], d['copyfrom_path'])
+            cur_rev =  d['copyfrom_rev']
+            ancestors.append({'path': cur_path, 'revision': cur_rev})
         if ui.get_level() >= ui.DEBUG:
             max_len = 0
             for idx in range(len(ancestors)):
@@ -285,7 +294,7 @@ def find_svn_ancestors(svn_repos_url, base_path, source_path, source_rev, prefix
                     level=ui.DEBUG, color='YELLOW')
     else:
         ui.status(prefix + ">> find_svn_ancestors: No ancestor-chain found: %s",
-            svn_repos_url+base_path+"/"+source_path+"@"+str(source_rev), level=ui.DEBUG, color='YELLOW')
+            svn_repos_url+start_path+"@"+str(start_rev), level=ui.DEBUG, color='YELLOW')
     return ancestors
 
 def get_rev_map(source_rev, prefix):
@@ -388,13 +397,13 @@ def do_svn_add(path_offset, source_rev, parent_copyfrom_path="", parent_copyfrom
         level=ui.DEBUG, color='GREEN')
     # Check if the given path has ancestors which chain back to the current source_base
     found_ancestor = False
-    ancestors = find_svn_ancestors(source_repos_url, source_base, path_offset, source_rev, prefix+"  ")
+    ancestors = find_svn_ancestors(source_repos_url, source_base+"/"+path_offset, source_rev, source_base, prefix+"  ")
     # ancestors[n] is the original (pre-branch-copy) trunk path.
     # ancestors[n-1] is the first commit on the new branch.
     copyfrom_path = ancestors[len(ancestors)-1]['path']     if ancestors else ""
     copyfrom_rev  = ancestors[len(ancestors)-1]['revision'] if ancestors else ""
     if ancestors:
-        # The copy-from path has ancestory back to source_url.
+        # The copy-from path has ancestry back to source_url.
         ui.status(prefix + ">> do_svn_add: Check copy-from: Found parent: %s", copyfrom_path+"@"+str(copyfrom_rev),
             level=ui.DEBUG, color='GREEN', bold=True)
         found_ancestor = True

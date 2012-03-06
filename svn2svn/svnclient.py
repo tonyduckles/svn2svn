@@ -264,7 +264,7 @@ def get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=False, get_c
     raise EmptySVNLog("No SVN log for %s between revisions %s and %s" %
         (svn_url, rev_start, rev_end))
 
-def get_first_svn_log_entry(svn_url, rev_start, rev_end, get_changed_paths=True):
+def get_first_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=True, get_changed_paths=True):
     """
     Get the first log entry after (or at) the given revision number in an SVN branch.
     By default the revision number is set to 0, which will give you the log
@@ -274,15 +274,15 @@ def get_first_svn_log_entry(svn_url, rev_start, rev_end, get_changed_paths=True)
     a copy from another branch, inspect elements of the 'changed_paths' entry
     in the returned dictionary.
     """
-    return get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=True, get_changed_paths=True)
+    return get_one_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=stop_on_copy, get_changed_paths=get_changed_paths)
 
-def get_last_svn_log_entry(svn_url, rev_start, rev_end, get_changed_paths=True):
+def get_last_svn_log_entry(svn_url, rev_start, rev_end, stop_on_copy=True, get_changed_paths=True):
     """
     Get the last log entry before/at the given revision number in an SVN branch.
     By default the revision number is set to HEAD, which will give you the log
     entry corresponding to the latest commit in branch.
     """
-    return get_one_svn_log_entry(svn_url, rev_end, rev_start, stop_on_copy=True, get_changed_paths=True)
+    return get_one_svn_log_entry(svn_url, rev_end, rev_start, stop_on_copy=stop_on_copy, get_changed_paths=get_changed_paths)
 
 
 log_duration_threshold = 10.0
