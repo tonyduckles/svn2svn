@@ -11,6 +11,7 @@ found_diff=0
 # Note: We assume that the replay working-copy ("_wc_target") still exists from make-replay-repo.sh
 #svn co -q file://$PWD/_repo_ref $WCREF
 svn co -q file://$PWD/_repo_ref/trunk $WCREF
+#svn co -q file://$PWD/_repo_ref/trunk/Module2/ProjectB $WCREF
 
 # Check if the final list of files is the same
 echo ">> Checking file-list..."

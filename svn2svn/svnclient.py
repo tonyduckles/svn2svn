@@ -289,14 +289,15 @@ log_duration_threshold = 10.0
 log_min_chunk_length = 10
 log_max_chunk_length = 10000
 
-def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_changed_paths=True, get_revprops=False):
+def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_changed_paths=True, get_revprops=False, ancestors=[]):
     """
     Iterate over SVN log entries between first_rev and last_rev.
 
     This function features chunked log fetching so that it isn't too nasty
     to the SVN server if many entries are requested.
 
-    NOTE: This chunked log fetching *ONLY* works correctly on paths which
+    NOTE: If *not* passing in the explicit (pre-calculated) 'ancestors' list,
+    this chunked log fetching *ONLY* works correctly on paths which
     are known to have existed unbroken in the SVN repository, e.g. /trunk.
     Chunked fetching breaks down if a path existed in earlier, then was
     deleted, and later was re-created. For example, if path was created in r5,
@@ -305,24 +306,51 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
         --> would yield r5, i.e. the _initial_ creation
       svn log --stop-on-copy --limit 1 -r 1:HEAD "path/to/file"
         --> would yield r5000, i.e. the _re-creation_
-    In theory this might work if we always search "backwards", searching from
-    the end going forward rather than forward going to the end...
+    Use find_svn_ancestors() to pass in the 'ancestors' array so that
+    we can correctly re-trace ancestry here.
     """
+    info = get_svn_info(svn_url)
+    svn_repos_url = info['repos_url']
     if last_rev == "HEAD":
-        info = get_svn_info(svn_url)
         last_rev = info['revision']
+    cur_url = svn_url
     cur_rev = first_rev
+    cur_anc_idx = None
+    cur_anc_end_rev = None
+    if ancestors:
+        #print ancestors
+        for idx in range(len(ancestors)-1, 0, -1):
+            if int(ancestors[idx]['revision']) > first_rev:
+                #print "Match ancestors["+str(idx)+"]"
+                cur_url = svn_repos_url+ancestors[idx]['path']
+                cur_anc_end_rev = ancestors[idx]['revision']
+                cur_anc_idx = idx
+                break
     chunk_length = log_min_chunk_length
     while cur_rev <= last_rev:
+        #print "cur_rev:%s cur_anc_end_rev:%s cur_anc_idx:%s" % (cur_rev, str(cur_anc_end_rev), cur_anc_idx)
+        if cur_anc_end_rev and cur_rev >= cur_anc_end_rev:
+            cur_anc_idx -= 1
+            if cur_anc_idx >= 0:
+                idx = cur_anc_idx
+                #print "Match ancestors["+str(idx)+"]"
+                cur_url = svn_repos_url+ancestors[idx]['path']
+                cur_anc_end_rev = ancestors[idx]['revision']
+            else:
+                cur_anc_end_rev = None
         start_t = time.time()
         stop_rev = min(last_rev, cur_rev + chunk_length)
-        entries = run_svn_log(svn_url, cur_rev, stop_rev, chunk_length,
+        stop_rev = min(stop_rev, cur_anc_end_rev) if cur_anc_end_rev else stop_rev
+        entries = run_svn_log(cur_url, cur_rev, stop_rev, chunk_length,
                               stop_on_copy, get_changed_paths, get_revprops)
         duration = time.time() - start_t
         if entries:
             for e in entries:
                 if e['revision'] > last_rev:
                     break
+                # Embed the current URL in the yielded dict, for ancestor cases where
+                # we might have followed a copy-from to some non-original URL.
+                e['url'] = cur_url
                 yield e
             if e['revision'] >= last_rev:
                 break

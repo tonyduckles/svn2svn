@@ -23,3 +23,8 @@ echo ""
 # svn2svn /trunk
 svn mkdir -q -m "Add /trunk" $REPOURL/trunk
 ../svn2svn.py $* file://$PWD/_repo_ref/trunk file://$PWD/_repo_replay/trunk
+
+## svn2svn /trunk/Module2/ProjectB
+#svn mkdir -q -m "Add /trunk" $REPOURL/trunk
+#svn mkdir -q --parents -m "Add /trunk/Module2/ProjectB" $REPOURL/trunk/Module2/ProjectB
+#../svn2svn.py $* file://$PWD/_repo_ref/trunk/Module2/ProjectB file://$PWD/_repo_replay/trunk/Module2/ProjectB
