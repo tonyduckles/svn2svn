@@ -198,7 +198,7 @@ def find_svn_ancestors(svn_repos_url, start_path, start_rev, stop_base_path=None
     cur_path = start_path
     cur_rev  = start_rev
     first_iter_done = False
-    ancestors_temp = []
+    ancestors = []
     while not done:
         # Get the first "svn log" entry for cur_path (relative to @cur_rev)
         ui.status(prefix + ">> find_svn_ancestors: %s", svn_repos_url+cur_path+"@"+str(cur_rev), level=ui.DEBUG, color='YELLOW')
@@ -263,38 +263,29 @@ def find_svn_ancestors(svn_repos_url, start_path, start_rev, stop_base_path=None
                 ui.status(prefix + ">> find_svn_ancestors: Found copy-from (action=%s): %s --> %s",
                     action, path, d['copyfrom_path']+"@"+str(d['copyfrom_revision']),
                     level=ui.DEBUG, color='YELLOW')
-                ancestors_temp.append({'path': path, 'revision': log_entry['revision'],
-                                       'copyfrom_path': d['copyfrom_path'], 'copyfrom_rev': d['copyfrom_revision']})
+                ancestors.append({'path': cur_path, 'revision': log_entry['revision'],
+                    'copyfrom_path': cur_path.replace(d['path'], d['copyfrom_path']), 'copyfrom_rev': d['copyfrom_revision']})
                 cur_path = cur_path.replace(d['path'], d['copyfrom_path'])
                 cur_rev =  d['copyfrom_revision']
                 # Follow the copy and keep on searching
                 break
-    ancestors = []
     if stop_base_path and no_ancestry:
         # If we're tracing back ancestry to a specific target stop_base_path and
         # the ancestry-chain stopped before we reached stop_base_path, then return
         # nothing since there is no ancestry chaining back to that target.
-        ancestors_temp = []
-    if ancestors_temp:
-        ancestors.append({'path': start_path, 'revision': start_rev})
-        cur_path = start_path
-        for idx in range(len(ancestors_temp)):
-            d = ancestors_temp[idx]
-            cur_path = cur_path.replace(d['path'], d['copyfrom_path'])
-            cur_rev =  d['copyfrom_rev']
-            ancestors.append({'path': cur_path, 'revision': cur_rev})
+        ancestors = []
+    if ancestors:
         if ui.get_level() >= ui.DEBUG:
             max_len = 0
             for idx in range(len(ancestors)):
                 d = ancestors[idx]
                 max_len = max(max_len, len(d['path']+"@"+str(d['revision'])))
             ui.status(prefix + ">> find_svn_ancestors: Found parent ancestors:", level=ui.DEBUG, color='YELLOW_B')
-            for idx in range(len(ancestors)-1):
+            for idx in range(len(ancestors)):
                 d = ancestors[idx]
-                d_next = ancestors[idx+1]
-                ui.status(prefix + " [%s] %s <-- %s", idx,
+                ui.status(prefix + " [%s] %s --> %s", idx,
                     str(d['path']+"@"+str(d['revision'])).ljust(max_len),
-                    str(d_next['path']+"@"+str(d_next['revision'])).ljust(max_len),
+                    str(d['copyfrom_path']+"@"+str(d['copyfrom_rev'])),
                     level=ui.DEBUG, color='YELLOW')
     else:
         ui.status(prefix + ">> find_svn_ancestors: No ancestor-chain found: %s",
@@ -411,14 +402,13 @@ def do_svn_add(source_url, path_offset, source_rev, source_ancestors, \
         level=ui.DEBUG, color='GREEN')
     # Check if the given path has ancestors which chain back to the current source_base
     found_ancestor = False
-    ancestors = find_svn_ancestors(source_repos_url, join_path(source_base, path_offset), source_rev, source_base, prefix+"  ")
-    if ancestors and not in_ancestors(source_ancestors, ancestors[len(ancestors)-1]):
-        ancestors = []
-    # ancestors[n] is the original (pre-branch-copy) trunk path.
-    # ancestors[n-1] is the first commit on the new branch.
-    copyfrom_path = ancestors[len(ancestors)-1]['path']     if ancestors else ""
-    copyfrom_rev  = ancestors[len(ancestors)-1]['revision'] if ancestors else ""
-    if ancestors:
+    ancestors = find_svn_ancestors(source_repos_url, join_path(source_base, path_offset), source_rev, stop_base_path=source_base, prefix=prefix+"  ")
+    ancestor = ancestors[len(ancestors)-1] if ancestors else None  # Choose the eldest ancestor, i.e. where we reached stop_base_path=source_base
+    if ancestor and not in_ancestors(source_ancestors, ancestor):
+        ancestor = None
+    copyfrom_path = ancestor['copyfrom_path'] if ancestor else ""
+    copyfrom_rev  = ancestor['copyfrom_rev']  if ancestor else ""
+    if ancestor:
         # The copy-from path has ancestry back to source_url.
         ui.status(prefix + ">> do_svn_add: Check copy-from: Found parent: %s", copyfrom_path+"@"+str(copyfrom_rev),
             level=ui.DEBUG, color='GREEN', bold=True)
@@ -455,7 +445,7 @@ def do_svn_add(source_url, path_offset, source_rev, source_ancestors, \
                     # If we have a parent copy-from path, we mis-match that so display a status
                     # message describing the action we're mimic'ing. If path_in_svn, then this
                     # is logically a "replace" rather than an "add".
-                    ui.status(" %s %s (from %s)", ('R' if path_in_svn else 'A'), join_path(source_base, path_offset), ancestors[1]['path']+"@"+str(copyfrom_rev), level=ui.VERBOSE)
+                    ui.status(" %s %s (from %s)", ('R' if path_in_svn else 'A'), join_path(source_base, path_offset), ancestors[0]['copyfrom_path']+"@"+str(copyfrom_rev), level=ui.VERBOSE)
                 if path_in_svn:
                     # If local file is already under version-control, then this is a replace.
                     ui.status(prefix + ">> do_svn_add: pre-copy: local path already exists: %s", path_offset, level=ui.DEBUG, color='GREEN')
@@ -524,9 +514,11 @@ def do_svn_add_dir(source_url, path_offset, source_rev, source_ancestors, \
     # Remove files/folders which exist in local but not remote
     for path in paths_local:
         if not path in paths_remote:
-            ui.status(" %s %s", 'D', join_path(join_path(source_base, path_offset), path), level=ui.VERBOSE)
-            run_svn(["update", join_path(path_offset, path)])
-            run_svn(["remove", "--force", join_path(path_offset, path)])
+            path_is_dir = True if path[-1] == "/" else False
+            working_path = join_path(path_offset, (path.rstrip('/') if path_is_dir else path)).lstrip('/')
+            ui.status(" %s %s", 'D', join_path(source_base, working_path), level=ui.VERBOSE)
+            run_svn(["update", working_path])
+            run_svn(["remove", "--force", working_path])
             # TODO: Does this handle deleted folders too? Wouldn't want to have a case
             #       where we only delete all files from folder but leave orphaned folder around.
 
@@ -793,7 +785,7 @@ def real_main(args, parser):
         # the source URL at the start-revision.
         disp_svn_log_summary(svnclient.get_one_svn_log_entry(source_repos_url, source_start_rev, source_start_rev))
         # Export and add file-contents from source_url@source_start_rev
-        source_start_url = source_url if not source_ancestors else source_repos_url+source_ancestors[len(source_ancestors)-1]['path']
+        source_start_url = source_url if not source_ancestors else source_repos_url+source_ancestors[len(source_ancestors)-1]['copyfrom_path']
         top_paths = run_svn(["list", "-r", source_start_rev, source_start_url+"@"+str(source_start_rev)])
         top_paths = top_paths.strip("\n").split("\n")
         for path in top_paths:
