@@ -311,40 +311,48 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
     """
     info = get_svn_info(svn_url)
     svn_repos_url = info['repos_url']
+    #print "iter_svn_log_entries: %s %s:%s" % (svn_url, first_rev, last_rev)
     if last_rev == "HEAD":
         last_rev = info['revision']
-    if first_rev == "1":
+    if int(first_rev) == 1:
         start_log = get_first_svn_log_entry(svn_url, first_rev, last_rev, stop_on_copy=stop_on_copy, get_changed_paths=False)
         if start_log['revision'] > first_rev:
             first_rev = start_log['revision']
-            #print "first_rev: %s" % first_rev
+    #print "first_rev: %s" % first_rev
     cur_url = svn_url
     cur_rev = first_rev
     cur_anc_idx = None
     cur_anc_end_rev = None
     if ancestors:
         #print ancestors
-        for idx in range(len(ancestors)-1, 0, -1):
-            if int(ancestors[idx]['revision']) > first_rev:
-                #print "Match ancestors[%s]: %s" % (idx, ancestors[idx])
-                cur_url = svn_repos_url+ancestors[idx]['copyfrom_path']
-                cur_anc_end_rev = ancestors[idx]['copyfrom_rev']
-                cur_anc_idx = idx
+        # Crawl ancestry, from oldest to newest
+        for idx in range(len(ancestors)-1, -1, -1):  # [n-1,...,0]
+            #print "(pre) Match ancestors[%s]: %s" % (idx, ancestors[idx])
+            cur_url = svn_repos_url+ancestors[idx]['copyfrom_path']
+            cur_anc_idx = idx
+            if first_rev < int(ancestors[idx]['copyfrom_rev']):
+                cur_anc_end_rev = int(ancestors[idx]['copyfrom_rev'])
                 break
+        if cur_anc_end_rev is None:
+            #print "(pre) Match ancestors[0] (final): %s" % (ancestors[0])
+            cur_anc_idx = -1
+            cur_url = svn_repos_url+ancestors[0]['path']
     chunk_length = log_min_chunk_length
     while cur_rev <= last_rev:
-        #print "cur_rev:%s cur_anc_end_rev:%s cur_anc_idx:%s" % (cur_rev, str(cur_anc_end_rev), cur_anc_idx)
+        #print "cur_rev:%s cur_anc_end_rev:%s cur_anc_idx:%s  %s" % (cur_rev, str(cur_anc_end_rev), cur_anc_idx, cur_url)
         if cur_anc_end_rev and cur_rev >= cur_anc_end_rev:
-            cur_rev = ancestors[cur_anc_idx]['revision']
+            cur_rev = int(ancestors[cur_anc_idx]['revision'])
             cur_anc_idx -= 1
             if cur_anc_idx >= 0:
                 idx = cur_anc_idx
-                #print "Match ancestors[%s]: %s" % (idx, ancestors[idx])
+                #print "(loop) Match ancestors[%s]: %s" % (idx, ancestors[idx])
                 cur_url = svn_repos_url+ancestors[idx]['copyfrom_path']
-                cur_anc_end_rev = ancestors[idx]['copyfrom_rev']
+                cur_anc_end_rev = int(ancestors[idx]['copyfrom_rev'])
             else:
+                #print "(loop) Match ancestors[0] (final): %s" % (ancestors[0])
+                cur_url = svn_repos_url+ancestors[0]['path']
                 cur_anc_end_rev = None
-        #print "cur_rev:%s cur_anc_end_rev:%s cur_anc_idx:%s" % (cur_rev, str(cur_anc_end_rev), cur_anc_idx)
+        #print "cur_rev:%s cur_anc_end_rev:%s cur_anc_idx:%s  %s" % (cur_rev, str(cur_anc_end_rev), cur_anc_idx, cur_url)
         start_t = time.time()
         stop_rev = min(last_rev, cur_rev + chunk_length)
         stop_rev = min(stop_rev, cur_anc_end_rev) if cur_anc_end_rev else stop_rev
@@ -361,7 +369,7 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
                 yield e
             if e['revision'] >= last_rev:
                 break
-            cur_rev = e['revision']+1
+            cur_rev = int(e['revision'])+1
         else:
             cur_rev = int(stop_rev)+1
         # Adapt chunk length based on measured request duration

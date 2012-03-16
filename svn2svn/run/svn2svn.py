@@ -573,7 +573,7 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
             # then we need to run the "svn rm" first, then change action='A'. This
             # lets the normal code below handle re-"svn add"'ing the files. This
             # should replicate the "replace".
-            if in_svn(path_offset):
+            if path_offset and in_svn(path_offset):
                 # Target path might not be under version-control yet, e.g. parent "add"
                 # was a copy-from a branch which had no ancestry back to trunk, and each
                 # child folder under that parent folder is a "replace" action on the final
