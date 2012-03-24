@@ -5,7 +5,7 @@ Replicate (replay) changesets from one SVN repository to another.
 from .. import base_version, full_version
 from .. import ui
 from .. import svnclient
-from ..shell import run_svn
+from ..shell import run_svn,run_shell_command
 from ..errors import (ExternalCommandFailed, UnsupportedSVNAction, InternalError, VerificationError)
 from parse import HelpFormatter
 
@@ -27,6 +27,8 @@ source_repos_url = ""    # URL to root of source SVN repo,        e.g. 'http://s
 source_base = ""         # Relative path of source_url in source SVN repo, e.g. '/trunk'
 source_repos_uuid = ""   # UUID of source SVN repo
 target_url =""           # URL to target path in target SVN repo, e.g. 'file:///svn/repo_target/trunk'
+target_repos_url = ""    # URL to root of target SVN repo,        e.g. 'http://server/svn/target'
+target_base = ""         # Relative path of target_url in target SVN repo, e.g. '/trunk'
 rev_map = {}             # The running mapping-table dictionary for source_url rev #'s -> target_url rev #'s
 options = None           # optparser options
 
@@ -94,6 +96,231 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
             if options.keep_date:
                 run_svn(["propset", "--revprop", "-r", rev_num, "svn:date", log_entry['date_raw']])
     return rev_num
+
+def verify_commit(source_rev, target_rev, log_entry=None):
+    """
+    Compare the ancestry/content/properties between source_url vs target_url
+    for a given revision.
+    """
+    # Gather the offsets in the source repo to check
+    check_paths = []
+    remove_paths = []
+    # TODO: Need to make this ancestry aware
+    if options.verify == 1 and log_entry is not None:  # Changed only
+        ui.status("Verifying source revision %s (only-changed)...", source_rev, level=ui.VERBOSE)
+        for d in log_entry['changed_paths']:
+            path = d['path']
+            if not is_child_path(path, source_base):
+                continue
+            if d['kind'] == "":
+                d['kind'] = svnclient.get_kind(source_repos_url, path, source_rev, d['action'], log_entry['changed_paths'])
+            assert (d['kind'] == 'file') or (d['kind'] == 'dir')
+            path_is_dir =  True if d['kind'] == 'dir'  else False
+            path_is_file = True if d['kind'] == 'file' else False
+            path_offset = path[len(source_base):].strip("/")
+            if d['action'] == 'D':
+                remove_paths.append(path_offset)
+            elif not path_offset in check_paths:
+                ui.status("verify_commit: path [mode=changed]: kind=%s: %s", d['kind'], path, level=ui.DEBUG, color='YELLOW')
+                if path_is_file:
+                    ui.status("  "+"verify_commit [mode=changed]: check_paths.append('%s')", path_offset, level=ui.DEBUG, color='GREEN')
+                    check_paths.append(path_offset)
+                if path_is_dir:
+                    if not d['action'] in 'AR':
+                        continue
+                    child_paths = run_svn(["list", "--recursive", "-r", source_rev, source_url.rstrip("/")+"/"+path_offset+"@"+str(source_rev)])
+                    child_paths = child_paths.strip("\n").split("\n")
+                    for child_path in child_paths:
+                        if not child_path:
+                            continue
+                        # Directories have a trailing slash in the "svn list" output
+                        child_path_is_dir = True if child_path[-1] == "/" else False
+                        child_path_offset = child_path.rstrip('/') if child_path_is_dir else child_path
+                        if not child_path_is_dir:
+                            # Only check files
+                            working_path = (path_offset+"/" if path_offset else "") + child_path_offset
+                            if not working_path in check_paths:
+                                ui.status("    "+"verify_commit [mode=changed]: check_paths.append('%s'+'/'+'%s')", path_offset, child_path_offset, level=ui.DEBUG, color='GREEN')
+                                check_paths.append(working_path)
+    if options.verify == 2:  # All paths
+        ui.status("Verifying source revision %s (all)...", source_rev, level=ui.VERBOSE)
+        child_paths = run_svn(["list", "--recursive", "-r", source_rev, source_url+"@"+str(source_rev)])
+        child_paths = child_paths.strip("\n").split("\n")
+        for child_path in child_paths:
+            if not child_path:
+                continue
+            # Directories have a trailing slash in the "svn list" output
+            child_path_is_dir = True if child_path[-1] == "/" else False
+            child_path_offset = child_path.rstrip('/') if child_path_is_dir else child_path
+            if not child_path_is_dir:
+                # Only check files
+                ui.status("verify_commit [mode=all]: check_paths.append('%s')", child_path_offset, level=ui.DEBUG, color='GREEN')
+                check_paths.append(child_path_offset)
+
+    # If there were any paths deleted in the last revision (options.verify=1 mode),
+    # check that they were correctly deleted.
+    if remove_paths:
+        count_total = len(remove_paths)
+        count = 0
+        for path_offset in remove_paths:
+            count += 1
+            if in_svn(path_offset):
+                ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE, color='RED')
+                raise VerificationError("Path removed in source rev r%s, but still exists in target WC: %s" % (source_rev, path_offset))
+            ui.status(" (%s/%s) Verify remove: OK: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE)
+
+    # Compare each of the check_path entries between source vs. target
+    if check_paths:
+        source_rev_first = int(min(rev_map, key=rev_map.get)) or 1  # The first source_rev we replayed into target
+        ui.status("verify_commit: source_rev_first:%s", source_rev_first, level=ui.DEBUG, color='YELLOW')
+        count_total = len(check_paths)
+        count = 0
+        for path_offset in check_paths:
+            count += 1
+            ui.status("verify_commit: path_offset:%s", path_offset, level=ui.DEBUG, color='YELLOW')
+            source_log_entries = svnclient.run_svn_log(source_url.rstrip("/")+"/"+path_offset+"@"+str(source_rev), source_rev, 1, source_rev-source_rev_first+1)
+            target_log_entries = svnclient.run_svn_log(target_url.rstrip("/")+"/"+path_offset+"@"+str(target_rev), target_rev, 1, target_rev)
+            # Build a list of commits in source_log_entries which matches our
+            # target path_offset.
+            working_path = source_base+"/"+path_offset
+            source_revs = []
+            for log_entry in source_log_entries:
+                source_rev_tmp = log_entry['revision']
+                if source_rev_tmp < source_rev_first:
+                    # Only process source revisions which have been replayed into target
+                    break
+                #ui.status("  [verify_commit] source_rev_tmp:%s, working_path:%s\n%s", source_rev_tmp, working_path, pp.pformat(log_entry), level=ui.DEBUG, color='MAGENTA')
+                changed_paths_temp = []
+                for d in log_entry['changed_paths']:
+                    path = d['path']
+                    # Match working_path or any parents
+                    if is_child_path(working_path, path):
+                        ui.status("  verify_commit: changed_path: %s %s@%s (parent:%s)", d['action'], path, source_rev_tmp, working_path, level=ui.DEBUG, color='YELLOW')
+                        changed_paths_temp.append({'path': path, 'data': d})
+                assert changed_paths_temp
+                # Reverse-sort any matches, so that we start with the most-granular (deepest in the tree) path.
+                changed_paths = sorted(changed_paths_temp, key=operator.itemgetter('path'), reverse=True)
+                # Find the action for our working_path in this revision. Use a loop to check in reverse order,
+                # so that if the target file/folder is "M" but has a parent folder with an "A" copy-from.
+                working_path_next = working_path
+                match_d = {}
+                for v in changed_paths:
+                    d = v['data']
+                    if not match_d:
+                        match_d = d
+                    path = d['path']
+                    if d['action'] not in _valid_svn_actions:
+                        raise UnsupportedSVNAction("In SVN rev. %d: action '%s' not supported. Please report a bug!"
+                            % (log_entry['revision'], d['action']))
+                    if d['action'] in 'AR' and d['copyfrom_revision']:
+                        # If we found a copy-from action for a parent path, adjust our
+                        # working_path to follow the rename/copy-from, just like find_svn_ancestors().
+                        working_path_next = working_path.replace(d['path'], d['copyfrom_path'])
+                        match_d = d
+                        break
+                if is_child_path(working_path, source_base):
+                    # Only add source_rev's where the path changed in this revision was a child
+                    # of source_base, so that we silently ignore any history that happened on
+                    # non-source_base paths (e.g. ignore branch history if we're only replaying trunk).
+                    is_diff = False
+                    d = match_d
+                    if d['action'] == 'M':
+                        # For action="M", we need to throw out cases where the only change was to
+                        # a property which we ignore, e.g. "svn:mergeinfo".
+                        if d['kind'] == "":
+                            d['kind'] = svnclient.get_kind(source_repos_url, working_path, log_entry['revision'], d['action'], log_entry['changed_paths'])
+                        assert (d['kind'] == 'file') or (d['kind'] == 'dir')
+                        if d['kind'] == 'file':
+                            # Check for file-content changes
+                            # TODO: This should be made ancestor-aware, since the file won't always be at the same path in rev-1
+                            sum1 = run_shell_command("svn cat -r %s '%s' | md5sum" % (source_rev_tmp, source_repos_url+working_path+"@"+str(source_rev_tmp)))
+                            sum2 = run_shell_command("svn cat -r %s '%s' | md5sum" % (source_rev_tmp-1, source_repos_url+working_path_next+"@"+str(source_rev_tmp-1)))
+                            is_diff = True if sum1 <> sum2 else False
+                        if not is_diff:
+                            # Check for property changes
+                            props1 = svnclient.get_all_props(source_repos_url+working_path, source_rev_tmp)
+                            props2 = svnclient.get_all_props(source_repos_url+working_path_next, source_rev_tmp-1)
+                            # Ignore changes to "svn:mergeinfo", since we don't copy that
+                            if 'svn:mergeinfo' in props1: del props1['svn:mergeinfo']
+                            if 'svn:mergeinfo' in props2: del props2['svn:mergeinfo']
+                            for prop in props1:
+                                if prop not in props2 or \
+                                        props1[prop] != props2[prop]:
+                                    is_diff = True
+                                    break
+                            for prop in props2:
+                                if prop not in props1 or \
+                                        props1[prop] != props2[prop]:
+                                    is_diff = True
+                                    break
+                        if not is_diff:
+                            ui.status("  verify_commit: skip %s@%s", working_path, source_rev_tmp, level=ui.DEBUG, color='GREEN_B', bold=True)
+                    else:
+                        is_diff = True
+                    if is_diff:
+                        ui.status("  verify_commit: source_revs.append(%s), working_path:%s", source_rev_tmp, working_path, level=ui.DEBUG, color='GREEN_B')
+                        source_revs.append({'path': working_path, 'revision': source_rev_tmp})
+                working_path = working_path_next
+            # Build a list of all the target commits "svn log" returned
+            target_revs = []
+            target_revs_rmndr = []
+            for log_entry in target_log_entries:
+                target_rev_tmp = log_entry['revision']
+                ui.status("  verify_commit: target_revs.append(%s)", target_rev_tmp, level=ui.DEBUG, color='GREEN_B')
+                target_revs.append(target_rev_tmp)
+                target_revs_rmndr.append(target_rev_tmp)
+            # Compare the two lists
+            for d in source_revs:
+                working_path   = d['path']
+                source_rev_tmp = d['revision']
+                target_rev_tmp = get_rev_map(source_rev_tmp, "  ")
+                working_offset = working_path[len(source_base):].strip("/")
+                sum1 = run_shell_command("svn cat -r %s '%s' | md5sum" % (source_rev_tmp, source_repos_url+working_path+"@"+str(source_rev_tmp)))
+                sum2 = run_shell_command("svn cat -r %s '%s' | md5sum" % (target_rev_tmp, target_url+"/"+working_offset+"@"+str(target_rev_tmp))) if target_rev_tmp is not None else ""
+                #print "source@%s: %s" % (str(source_rev_tmp).ljust(6), sum1)
+                #print "target@%s: %s" % (str(target_rev_tmp).ljust(6), sum2)
+                ui.status("  verify_commit: %s: source=%s target=%s", working_offset, source_rev_tmp, target_rev_tmp, level=ui.DEBUG, color='GREEN')
+                if not target_rev_tmp:
+                    ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE, color='RED')
+                    raise VerificationError("Unable to find corresponding target_rev for source_rev r%s in rev_map (path_offset='%s')" % (source_rev_tmp, path_offset))
+                if target_rev_tmp not in target_revs:
+                    # If found a source_rev with no equivalent target_rev in target_revs,
+                    # check if the only difference in source_rev vs. source_rev-1 is the
+                    # removal/addition of a trailing newline char, since this seems to get
+                    # stripped-out sometimes during the replay (via "svn export"?).
+                    # Strip any trailing \r\n from file-content (http://stackoverflow.com/a/1656218/346778)
+                    sum1 = run_shell_command("svn cat -r %s '%s' | perl -i -p0777we's/\\r\\n\z//' | md5sum" % (source_rev_tmp,   source_repos_url+working_path+"@"+str(source_rev_tmp)))
+                    sum2 = run_shell_command("svn cat -r %s '%s' | perl -i -p0777we's/\\r\\n\z//' | md5sum" % (source_rev_tmp-1, source_repos_url+working_path+"@"+str(source_rev_tmp-1)))
+                    if sum1 <> sum2:
+                        ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE, color='RED')
+                        raise VerificationError("Found source_rev (r%s) with no corresponding target_rev: path_offset='%s'" % (source_rev_tmp, path_offset))
+                target_revs_rmndr.remove(target_rev_tmp)
+            if target_revs_rmndr:
+                rmndr_list = ", ".join(map(str, target_revs_rmndr))
+                ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE, color='RED')
+                raise VerificationError("Found one or more *extra* target_revs: path_offset='%s', target_revs='%s'" % (path_offset, rmndr_list))
+            ui.status(" (%s/%s) Verify path: OK: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE)
+
+    # Ensure there are no "extra" files in the target side
+    if options.verify == 2:
+        target_paths = []
+        child_paths = run_svn(["list", "--recursive", "-r", target_rev, target_url+"@"+str(target_rev)])
+        child_paths = child_paths.strip("\n").split("\n")
+        for child_path in child_paths:
+            if not child_path:
+                continue
+            # Directories have a trailing slash in the "svn list" output
+            child_path_is_dir = True if child_path[-1] == "/" else False
+            child_path_offset = child_path.rstrip('/') if child_path_is_dir else child_path
+            if not child_path_is_dir:
+                target_paths.append(child_path_offset)
+        # Compare
+        for path_offset in target_paths:
+            if not path_offset in check_paths:
+                raise VerificationError("Path exists in target (@%s) but not source (@%s): %s" % (target_rev, source_rev, path_offset))
+        for path_offset in check_paths:
+            if not path_offset in target_paths:
+                raise VerificationError("Path exists in source (@%s) but not target (@%s): %s" % (source_rev, target_rev, path_offset))
 
 def full_svn_revert():
     """
@@ -718,8 +945,9 @@ def real_main(args, parser):
     source_repos_url = source_info['repos_url']       # e.g. 'http://server/svn/source'
     source_base = source_url[len(source_repos_url):]  # e.g. '/trunk'
     source_repos_uuid = source_info['repos_uuid']
-    global target_repos_url
-    target_repos_url = target_info['repos_url']
+    global target_repos_url,target_base
+    target_repos_url = target_info['repos_url']       # e.g. 'http://server/svn/target'
+    target_base = target_url[len(target_repos_url):]  # e.g. '/trunk'
 
     # Init start and end revision
     try:
@@ -824,6 +1052,8 @@ def real_main(args, parser):
             set_rev_map(source_start_rev, target_rev)
             commit_count += 1
             target_rev_last = target_rev
+            if options.verify:
+                verify_commit(source_rev, target_rev_last)
     else:
         # Re-build the rev_map based on any already-replayed history in target_url
         build_rev_map(target_url, target_rev_last, source_info)
@@ -832,7 +1062,7 @@ def real_main(args, parser):
         source_start_rev = int(max(rev_map, key=rev_map.get))
         assert source_start_rev
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
-        ui.status("")
+        ui.status("", level=ui.VERBOSE)
 
     if options.keep_revnum and source_start_rev < target_rev_last:
         parser.error("last target revision is equal-or-higher than starting source revision; "
@@ -874,6 +1104,8 @@ def real_main(args, parser):
                 set_rev_map(source_rev, target_rev)
                 target_rev_last = target_rev
                 commit_count += 1
+                if options.verify:
+                    verify_commit(source_rev, target_rev_last, log_entry)
                 # Run "svn cleanup" every 100 commits if SVN 1.7+, to clean-up orphaned ".svn/pristines/*"
                 if svn_vers >= 1.7 and (commit_count % 100 == 0):
                     run_svn(["cleanup"])
@@ -881,6 +1113,8 @@ def real_main(args, parser):
             # If there were no new source_url revisions to process, init source_rev
             # for the "finally" message below to be the last source revision replayed.
             source_rev = source_start_rev
+            if options.verify:
+                verify_commit(source_start_rev, target_rev_last)
 
     except KeyboardInterrupt:
         print "\nStopped by user."
@@ -965,6 +1199,10 @@ Examples:
     parser.add_option("-n", "--dry-run", action="store_true", dest="dry_run", default=False,
                       help="process next source revision but don't commit changes to "
                            "target working-copy (forces --limit=1)")
+    parser.add_option("-x", "--verify",     action="store_const", const=1, dest="verify",
+                      help="verify ancestry and content for changed paths in commit after every target commit or last target commit")
+    parser.add_option("-X", "--verify-all", action="store_const", const=2, dest="verify",
+                      help="verify ancestry and content for entire target_url tree after every target commit or last target commit")
     parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
                       help="enable debugging output (same as -vvv)")
     global options

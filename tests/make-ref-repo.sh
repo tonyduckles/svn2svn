@@ -86,12 +86,15 @@ svn merge -q $BRANCH
 svn_commit "Test 2: Rename Module/ProjectA/FileA2.txt -> Module/ProjectB/FileB3.txt"
 
 # Test #3: Verify rename
+# * Test svn:mergeinfo-only change
 BRANCH="$REPOURL/branches/test3"
 svn copy -q -m "Create branch" $TRUNK $BRANCH
 svn switch -q $BRANCH
 show_last_commit
 echo "Module/ProjectB/FileB2.txt (Test 3)" >> $WC/Module/ProjectB/FileB2.txt
 svn propset -q filename FileB2.txt $WC/Module/ProjectB/FileB2.txt
+svn propset -q 'svn:mergeinfo' '/branches/foo/Module/ProjectB/FileB1.txt:5' $WC/Module/ProjectB/FileB1.txt
+svn propset -q 'svn:mergeinfo' '/branches/foo/Module/ProjectB/FileB2.txt:5' $WC/Module/ProjectB/FileB2.txt
 svn_commit "Test 3: Verify Module/ProjectB/FileB2.txt"
 svn switch -q $TRUNK
 svn merge -q $BRANCH
