@@ -8,6 +8,7 @@ from .. import svnclient
 from ..shell import run_svn,run_shell_command
 from ..errors import (ExternalCommandFailed, UnsupportedSVNAction, InternalError, VerificationError)
 from parse import HelpFormatter
+from breakhandler import BreakHandler
 
 import sys
 import os
@@ -88,6 +89,12 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
             args += list(commit_paths)
     rev_num = None
     if not options.dry_run:
+        # Use BreakHandler class to temporarily redirect SIGINT handler, so that
+        # "svn commit" + post-commit rev-prop updating is a quasi-atomic unit.
+        # If user presses Ctrl-C during this, wait until after this full action
+        # has finished raising the KeyboardInterrupt exception.
+        bh = BreakHandler()
+        bh.enable()
         # Run the "svn commit" command, and screen-scrape the target_rev value (if any)
         output = run_svn(args)
         rev_num = parse_svn_commit_rev(output) if output else None
@@ -95,6 +102,10 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
             ui.status("Committed revision %s.", rev_num)
             if options.keep_date:
                 run_svn(["propset", "--revprop", "-r", rev_num, "svn:date", log_entry['date_raw']])
+        bh.disable()
+        # Check if the user tried to press Ctrl-C
+        if bh.trapped:
+            raise KeyboardInterrupt
     return rev_num
 
 def verify_commit(source_rev, target_rev, log_entry=None):
@@ -1076,9 +1087,6 @@ def real_main(args, parser):
     it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev, get_revprops=True, ancestors=source_ancestors) if source_start_rev < source_end_rev else []
     source_rev = None
 
-    # TODO: Now that commit_from_svn_log_entry() might try to do a "svn propset svn:date",
-    #       we might want some better KeyboardInterupt handilng here, to ensure that
-    #       commit_from_svn_log_entry() always runs as an atomic unit.
     try:
         for log_entry in it_log_entries:
             if options.entries_proc_limit:
