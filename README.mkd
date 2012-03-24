@@ -8,12 +8,10 @@ Features
   an empty target repo or simply an empty folder/branch in the target repo.
 - **Maintains logical history (when possible)**, e.g. uses "svn copy" for renames.
 - **Maintains original commit messages**.
-- **Optionally maintain source commit authors (`svn:author`)**. Requires non-authenticated
-  access to the target repo, since this relies upon the `--username` SVN
-  command-line arg.
-- **Optionally maintain source commit timestamps (`svn:date`)**. Requires a
-  "pre-revprop-change" hook script in the target repo, to be able to change
-  the "`svn:date`" revprops after target commits have been made.
+- **Optionally maintain source commit authors (`svn:author`) and commit timestamps
+  (`svn:date`)**.  Requires a "pre-revprop-change" hook script in the target
+  repo, to be able to change the "`svn:author`" and "`svn:date`" revprops after
+  target commits have been made.
 - **Optionally maintain identical revision #'s between source vs. target repo**.
   Effectively requires that you're replaying into an empty target repo,
   or rather that the first source repo revision to be replayed is less than

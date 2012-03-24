@@ -66,8 +66,6 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
         message += "\nDate: " + svn_date
     if options.log_author:
         message += "\nAuthor: " + log_entry['author']
-    if options.keep_author:
-        args += ["--username", log_entry['author']]
     args += ["-m", message]
     revprops = {}
     if log_entry['revprops']:
@@ -102,6 +100,8 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
             ui.status("Committed revision %s.", rev_num)
             if options.keep_date:
                 run_svn(["propset", "--revprop", "-r", rev_num, "svn:date", log_entry['date_raw']])
+            if options.keep_author:
+                run_svn(["propset", "--revprop", "-r", rev_num, "svn:author",  log_entry['author']])
         bh.disable()
         # Check if the user tried to press Ctrl-C
         if bh.trapped:
@@ -1180,7 +1180,7 @@ Examples:
                            "maintain same commit author, same commit time, and file/dir properties")
     parser.add_option("-U", "--keep-author", action="store_true", dest="keep_author", default=False,
                       help="maintain same commit authors (svn:author) as source\n"
-                           "(REQUIRES target_url be non-auth'd, e.g. file://-based, since this uses --username to set author)")
+                           "(REQUIRES 'pre-revprop-change' hook script to allow 'svn:author' changes)")
     parser.add_option("-D", "--keep-date", action="store_true", dest="keep_date", default=False,
                       help="maintain same commit time (svn:date) as source\n"
                            "(REQUIRES 'pre-revprop-change' hook script to allow 'svn:date' changes)")
