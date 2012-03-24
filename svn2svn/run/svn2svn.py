@@ -97,11 +97,11 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
         output = run_svn(args)
         rev_num = parse_svn_commit_rev(output) if output else None
         if rev_num is not None:
-            ui.status("Committed revision %s.", rev_num)
             if options.keep_date:
                 run_svn(["propset", "--revprop", "-r", rev_num, "svn:date", log_entry['date_raw']])
             if options.keep_author:
                 run_svn(["propset", "--revprop", "-r", rev_num, "svn:author",  log_entry['author']])
+            ui.status("Committed revision %s.", rev_num)
         bh.disable()
         # Check if the user tried to press Ctrl-C
         if bh.trapped:
@@ -932,12 +932,12 @@ def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
     return target_rev_last
 
 def disp_svn_log_summary(log_entry):
-    ui.status("------------------------------------------------------------------------")
+    ui.status("------------------------------------------------------------------------", level=ui.VERBOSE)
     ui.status("r%s | %s | %s",
         log_entry['revision'],
         log_entry['author'],
-        str(datetime.fromtimestamp(int(log_entry['date'])).isoformat(' ')))
-    ui.status(log_entry['message'])
+        str(datetime.fromtimestamp(int(log_entry['date'])).isoformat(' ')), level=ui.VERBOSE)
+    ui.status(log_entry['message'], level=ui.VERBOSE)
 
 def real_main(args, parser):
     global source_url, target_url, rev_map
@@ -1016,7 +1016,7 @@ def real_main(args, parser):
         # This is the revision we will start from for source_url
         source_start_rev = int(source_start_log['revision'])
         ui.status("Starting at source revision %s.", source_start_rev, level=ui.VERBOSE)
-        ui.status("")
+        ui.status("", level=ui.VERBOSE)
         if options.keep_revnum and source_rev > target_rev_last:
             target_rev_last = keep_revnum(source_rev, target_rev_last, wc_target_tmp)
 
