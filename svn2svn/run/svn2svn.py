@@ -913,6 +913,7 @@ def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
     Add "padding" target revisions as needed to keep source and target
     revision #'s identical.
     """
+    bh = BreakHandler()
     if int(source_rev) <= int(target_rev_last):
         raise InternalError("keep-revnum mode is enabled, "
             "but source revision (r%s) is less-than-or-equal last target revision (r%s)" % \
@@ -924,10 +925,17 @@ def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
         run_svn(["checkout", "-r", "HEAD", "--depth=empty", target_repos_url, wc_target_tmp])
         for rev_num in range(int(target_rev_last)+1, int(source_rev)):
             run_svn(["propset", "svn2svn:keep-revnum", rev_num, wc_target_tmp])
+            # Prevent Ctrl-C's during this inner part, so we'll always display
+            # the "Commit revision ..." message if we ran a "svn commit".
+            bh.enable()
             output = run_svn(["commit", "-m", "", wc_target_tmp])
             rev_num_tmp = parse_svn_commit_rev(output) if output else None
             assert rev_num == rev_num_tmp
             ui.status("Committed revision %s (keep-revnum).", rev_num)
+            bh.disable()
+            # Check if the user tried to press Ctrl-C
+            if bh.trapped:
+                raise KeyboardInterrupt
             target_rev_last = rev_num
         shutil.rmtree(wc_target_tmp)
     return target_rev_last
@@ -1085,18 +1093,13 @@ def real_main(args):
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
         ui.status("", level=ui.VERBOSE)
 
-    if options.keep_revnum and source_start_rev < target_rev_last:
-        print "Error: Last target revision (r%s) is equal-or-higher than starting source revision (r%s). " \
-              "Cannot use --keep-revnum mode." % (target_rev_last, source_start_rev)
-        sys.exit(1)
-
     svn_vers_t = svnclient.get_svn_client_version()
     svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
 
     # Load SVN log starting from source_start_rev + 1
     source_ancestors = find_svn_ancestors(source_repos_url, source_base, source_end_rev, prefix="  ")
     it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev, get_revprops=True, ancestors=source_ancestors) if source_start_rev < source_end_rev else []
-    source_rev = None
+    source_rev_last = source_start_rev
 
     try:
         for log_entry in it_log_entries:
@@ -1108,6 +1111,10 @@ def real_main(args):
             log_url =    log_entry['url']
             #print "source_url:%s  log_url:%s" % (source_url, log_url)
             if options.keep_revnum:
+                if source_rev < target_rev_last:
+                    print "Error: Last target revision (r%s) is equal-or-higher than starting source revision (r%s). " \
+                        "Cannot use --keep-revnum mode." % (target_rev_last, source_start_rev)
+                    sys.exit(1)
                 target_rev_last = keep_revnum(source_rev, target_rev_last, wc_target_tmp)
             disp_svn_log_summary(log_entry)
             # Process all the changed-paths in this log entry
@@ -1117,6 +1124,7 @@ def real_main(args):
             # Commit any changes made to _wc_target
             target_revprops = gen_tracking_revprops(source_rev)   # Build source-tracking revprop's
             target_rev = commit_from_svn_log_entry(log_entry, commit_paths, target_revprops=target_revprops)
+            source_rev_last = source_rev
             if target_rev:
                 # Update rev_map, mapping table of source-repo rev # -> target-repo rev #
                 source_rev = log_entry['revision']
@@ -1128,12 +1136,11 @@ def real_main(args):
                 # Run "svn cleanup" every 100 commits if SVN 1.7+, to clean-up orphaned ".svn/pristines/*"
                 if svn_vers >= 1.7 and (commit_count % 100 == 0):
                     run_svn(["cleanup"])
-        if not source_rev:
-            # If there were no new source_url revisions to process, init source_rev
-            # for the "finally" message below to be the last source revision replayed.
-            source_rev = source_start_rev
+        if source_rev_last == source_start_rev:
+            # If there were no new source_url revisions to process, still trigger
+            # "full-mode" verify check (if enabled).
             if options.verify:
-                verify_commit(source_start_rev, target_rev_last)
+                verify_commit(source_rev_last, target_rev_last)
 
     except KeyboardInterrupt:
         print "\nStopped by user."
@@ -1148,7 +1155,7 @@ def real_main(args):
         print run_svn(["status"])
         full_svn_revert()
     finally:
-        print "\nFinished at source revision %s%s." % (source_rev, " (dry-run)" if options.dry_run else "")
+        print "\nFinished at source revision %s%s." % (source_rev_last, " (dry-run)" if options.dry_run else "")
 
 def main():
     # Defined as entry point. Must be callable without arguments.
