@@ -1002,7 +1002,13 @@ def real_main(args):
         full_svn_revert()
 
     if not options.cont_from_break:
-        # TODO: Warn user if trying to start (non-continue) into a non-empty target path?
+        # Warn user if trying to start (non-continue) into a non-empty target path
+        if not options.force_nocont:
+            top_paths = run_svn(["list", "-r", "HEAD", target_url])
+            if len(top_paths)>0:
+                print "Error: Trying to replay (non-continue-mode) into a non-empty target_url location. " \
+                      "Use --force if you're sure this is what you want."
+                sys.exit(1)
         # Get the first log entry at/after source_start_rev, which is where
         # we'll do the initial import from.
         source_ancestors = find_svn_ancestors(source_repos_url, source_base, source_end_rev, prefix="  ")
@@ -1196,6 +1202,8 @@ Examples:
                             "revisions (by modifying a 'svn2svn:keep-revnum' property at the root of the target repo)")
     parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
                       help="continue from last source commit to target (based on svn2svn:* revprops)")
+    parser.add_option("-f", "--force", action="store_true", dest="force_nocont",
+                      help="allow replaying into a non-empty target folder")
     parser.add_option("-r", "--revision", type="string", dest="revision", metavar="ARG",
                       help="revision range to replay from source_url\n"
                            "A revision argument can be one of:\n"
