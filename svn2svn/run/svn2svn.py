@@ -18,6 +18,7 @@ import shutil
 import operator
 import optparse
 import re
+import urllib
 from datetime import datetime
 
 _valid_svn_actions = "MARD"   # The list of known SVN action abbr's, from "svn log"
@@ -941,8 +942,8 @@ def disp_svn_log_summary(log_entry):
 
 def real_main(args, parser):
     global source_url, target_url, rev_map
-    source_url = args.pop(0).rstrip("/")    # e.g. 'http://server/svn/source/trunk'
-    target_url = args.pop(0).rstrip("/")    # e.g. 'file:///svn/target/trunk'
+    source_url = urllib.quote(args.pop(0).rstrip("/"),"/:")   # e.g. 'http://server/svn/source/trunk'
+    target_url = urllib.quote(args.pop(0).rstrip("/"),"/:")   # e.g. 'file:///svn/target/trunk'
     ui.status("options: %s", str(options), level=ui.DEBUG, color='GREEN')
 
     # Make sure that both the source and target URL's are valid
