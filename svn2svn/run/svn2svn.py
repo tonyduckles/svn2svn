@@ -102,7 +102,7 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
                 run_svn(["propset", "--revprop", "-r", rev_num, "svn:date", log_entry['date_raw']])
             if options.keep_author:
                 run_svn(["propset", "--revprop", "-r", rev_num, "svn:author",  log_entry['author']])
-            ui.status("Committed revision %s.", rev_num)
+            ui.status("Committed revision %s (source r%s).", rev_num, log_entry['revision'])
         bh.disable()
         # Check if the user tried to press Ctrl-C
         if bh.trapped:
@@ -940,7 +940,7 @@ def disp_svn_log_summary(log_entry):
         str(datetime.fromtimestamp(int(log_entry['date'])).isoformat(' ')), level=ui.VERBOSE)
     ui.status(log_entry['message'], level=ui.VERBOSE)
 
-def real_main(args, parser):
+def real_main(args):
     global source_url, target_url, rev_map
     source_url = urllib.quote(args.pop(0).rstrip("/"),"/:")   # e.g. 'http://server/svn/source/trunk'
     target_url = urllib.quote(args.pop(0).rstrip("/"),"/:")   # e.g. 'file:///svn/target/trunk'
@@ -965,11 +965,13 @@ def real_main(args, parser):
     try:
         source_start_rev = svnclient.get_svn_rev(source_repos_url, options.rev_start if options.rev_start else 1)
     except ExternalCommandFailed:
-        parser.error("invalid start source revision value: %s" % (options.rev_start))
+        print "Error: Invalid start source revision value: %s" % (options.rev_start)
+        sys.exit(1)
     try:
         source_end_rev   = svnclient.get_svn_rev(source_repos_url, options.rev_end   if options.rev_end   else "HEAD")
     except ExternalCommandFailed:
-        parser.error("invalid end source revision value: %s" % (options.rev_end))
+        print "Error: Invalid end source revision value: %s" % (options.rev_end)
+        sys.exit(1)
     ui.status("Using source revision range %s:%s", source_start_rev, source_end_rev, level=ui.VERBOSE)
 
     # TODO: If options.keep_date, should we try doing a "svn propset" on an *existing* revision
@@ -978,7 +980,7 @@ def real_main(args, parser):
 
     target_rev_last =  target_info['revision']   # Last revision # in the target repo
     wc_target = os.path.abspath('_wc_target')
-    wc_target_tmp = os.path.abspath('_tmp_wc_target')
+    wc_target_tmp = os.path.abspath('_wc_target_tmp')
     num_entries_proc = 0
     commit_count = 0
     source_rev = None
@@ -1070,15 +1072,17 @@ def real_main(args, parser):
         # Re-build the rev_map based on any already-replayed history in target_url
         build_rev_map(target_url, target_rev_last, source_info)
         if not rev_map:
-            parser.error("called with continue-mode, but no already-replayed source history found in target_url")
+            print "Error: Called with continue-mode, but no already-replayed source history found in target_url."
+            sys.exit(1)
         source_start_rev = int(max(rev_map, key=rev_map.get))
         assert source_start_rev
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
         ui.status("", level=ui.VERBOSE)
 
     if options.keep_revnum and source_start_rev < target_rev_last:
-        parser.error("last target revision is equal-or-higher than starting source revision; "
-                     "cannot use --keep-revnum mode")
+        print "Error: Last target revision (r%s) is equal-or-higher than starting source revision (r%s). " \
+              "Cannot use --keep-revnum mode." % (target_rev_last, source_start_rev)
+        sys.exit(1)
 
     svn_vers_t = svnclient.get_svn_client_version()
     svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
@@ -1242,7 +1246,7 @@ Examples:
         options.keep_date   = True
         options.keep_prop   = True
     ui.update_config(options)
-    return real_main(args, parser)
+    return real_main(args)
 
 
 if __name__ == "__main__":
