@@ -114,6 +114,7 @@ def verify_commit(source_rev, target_rev, log_entry=None):
     Compare the ancestry/content/properties between source_url vs target_url
     for a given revision.
     """
+    error_cnt = 0
     # Gather the offsets in the source repo to check
     check_paths = []
     remove_paths = []
@@ -177,9 +178,11 @@ def verify_commit(source_rev, target_rev, log_entry=None):
         for path_offset in remove_paths:
             count += 1
             if in_svn(path_offset):
-                ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE, color='RED')
-                raise VerificationError("Path removed in source rev r%s, but still exists in target WC: %s" % (source_rev, path_offset))
-            ui.status(" (%s/%s) Verify remove: OK: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE)
+                ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA, color='RED')
+                ui.status("VerificationError: Path removed in source rev r%s, but still exists in target WC: %s", source_rev, path_offset, color='RED')
+                error_cnt +=1
+            else:
+                ui.status(" (%s/%s) Verify remove: OK: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA)
 
     # Compare each of the check_path entries between source vs. target
     if check_paths:
@@ -189,6 +192,8 @@ def verify_commit(source_rev, target_rev, log_entry=None):
         count = 0
         for path_offset in check_paths:
             count += 1
+            if count % 500 == 0:
+                ui.status("...processed %s (%s of %s)..." % (count, count, count_total), level=ui.VERBOSE)
             ui.status("verify_commit: path_offset:%s", path_offset, level=ui.DEBUG, color='YELLOW')
             source_log_entries = svnclient.run_svn_log(source_url.rstrip("/")+"/"+path_offset+"@"+str(source_rev), source_rev, 1, source_rev-source_rev_first+1)
             target_log_entries = svnclient.run_svn_log(target_url.rstrip("/")+"/"+path_offset+"@"+str(target_rev), target_rev, 1, target_rev)
@@ -293,8 +298,10 @@ def verify_commit(source_rev, target_rev, log_entry=None):
                 #print "target@%s: %s" % (str(target_rev_tmp).ljust(6), sum2)
                 ui.status("  verify_commit: %s: source=%s target=%s", working_offset, source_rev_tmp, target_rev_tmp, level=ui.DEBUG, color='GREEN')
                 if not target_rev_tmp:
-                    ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE, color='RED')
-                    raise VerificationError("Unable to find corresponding target_rev for source_rev r%s in rev_map (path_offset='%s')" % (source_rev_tmp, path_offset))
+                    ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA, color='RED')
+                    ui.status("VerificationError: Unable to find corresponding target_rev for source_rev r%s in rev_map (path_offset='%s')", source_rev_tmp, path_offset, color='RED')
+                    error_cnt +=1
+                    continue
                 if target_rev_tmp not in target_revs:
                     # If found a source_rev with no equivalent target_rev in target_revs,
                     # check if the only difference in source_rev vs. source_rev-1 is the
@@ -304,14 +311,17 @@ def verify_commit(source_rev, target_rev, log_entry=None):
                     sum1 = run_shell_command("svn cat -r %s '%s' | perl -i -p0777we's/\\r\\n\z//' | md5sum" % (source_rev_tmp,   source_repos_url+working_path+"@"+str(source_rev_tmp)))
                     sum2 = run_shell_command("svn cat -r %s '%s' | perl -i -p0777we's/\\r\\n\z//' | md5sum" % (source_rev_tmp-1, source_repos_url+working_path+"@"+str(source_rev_tmp-1)))
                     if sum1 <> sum2:
-                        ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE, color='RED')
-                        raise VerificationError("Found source_rev (r%s) with no corresponding target_rev: path_offset='%s'" % (source_rev_tmp, path_offset))
+                        ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA, color='RED')
+                        ui.status("VerificationError: Found source_rev (r%s) with no corresponding target_rev: path_offset='%s'", source_rev_tmp, path_offset, color='RED')
+                        error_cnt +=1
+                    continue
                 target_revs_rmndr.remove(target_rev_tmp)
             if target_revs_rmndr:
                 rmndr_list = ", ".join(map(str, target_revs_rmndr))
-                ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE, color='RED')
-                raise VerificationError("Found one or more *extra* target_revs: path_offset='%s', target_revs='%s'" % (path_offset, rmndr_list))
-            ui.status(" (%s/%s) Verify path: OK: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.VERBOSE)
+                ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA, color='RED')
+                ui.status("VerificationError: Found one or more *extra* target_revs: path_offset='%s', target_revs='%s'", path_offset, rmndr_list, color='RED')
+                error_cnt +=1
+            ui.status(" (%s/%s) Verify path: OK: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA)
 
     # Ensure there are no "extra" files in the target side
     if options.verify == 2:
@@ -329,10 +339,16 @@ def verify_commit(source_rev, target_rev, log_entry=None):
         # Compare
         for path_offset in target_paths:
             if not path_offset in check_paths:
-                raise VerificationError("Path exists in target (@%s) but not source (@%s): %s" % (target_rev, source_rev, path_offset))
+                ui.status("VerificationError: Path exists in target (@%s) but not source (@%s): %s", target_rev, source_rev, path_offset, color='RED')
+                error_cnt += 1
         for path_offset in check_paths:
             if not path_offset in target_paths:
-                raise VerificationError("Path exists in source (@%s) but not target (@%s): %s" % (source_rev, target_rev, path_offset))
+                ui.status("VerificationError: Path exists in source (@%s) but not target (@%s): %s", source_rev, target_rev, path_offset, color='RED')
+                error_cnt += 1
+
+    if error_cnt > 0:
+        raise VerificationError("Found %s verification errors" % (error_cnt))
+    ui.status("Verified revision %s (%s).", target_rev, "all" if options.verify == 2 else "only-changed")
 
 def full_svn_revert():
     """
