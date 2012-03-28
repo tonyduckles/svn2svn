@@ -53,7 +53,7 @@ def status(msg, *args, **kwargs):
     The following keyword arguments are allowed:
       level    : One of DEFAULT, VERBOSE or DEBUG.
       linebreak: If True a new line is appended to msg (default: True).
-      truncate : Truncate output if larger then term width (default: True).
+      truncate : Truncate output if larger then term width (default: False).
     """
     global _level
     level = kwargs.get('level', DEFAULT)
