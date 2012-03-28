@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Create a reference repo with both /trunk and /branches history
 
 show_last_commit() {

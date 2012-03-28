@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Use svn2svn.py to create a filtered repo with only /trunk history
 
 PWD=$(pwd)
