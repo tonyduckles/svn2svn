@@ -4,6 +4,7 @@ Replicate (replay) changesets from one SVN repository to another.
 
 from .. import base_version, full_version
 from .. import ui
+from .. import shell
 from .. import svnclient
 from ..shell import run_svn,run_shell_command
 from ..errors import (ExternalCommandFailed, UnsupportedSVNAction, InternalError, VerificationError)
@@ -12,9 +13,7 @@ from breakhandler import BreakHandler
 
 import sys
 import os
-import time
 import traceback
-import shutil
 import operator
 import optparse
 import re
@@ -364,7 +363,7 @@ def full_svn_revert():
                 if os.path.isfile(path):
                     os.remove(path)
                 if os.path.isdir(path):
-                    shutil.rmtree(path)
+                    shell.rmtree(path)
 
 def gen_tracking_revprops(source_rev):
     """
@@ -937,7 +936,7 @@ def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
     if int(target_rev_last) < int(source_rev)-1:
         # Add "padding" target revisions to keep source and target rev #'s identical
         if os.path.exists(wc_target_tmp):
-            shutil.rmtree(wc_target_tmp)
+            shell.rmtree(wc_target_tmp)
         run_svn(["checkout", "-r", "HEAD", "--depth=empty", target_repos_url, wc_target_tmp])
         for rev_num in range(int(target_rev_last)+1, int(source_rev)):
             run_svn(["propset", "svn2svn:keep-revnum", rev_num, wc_target_tmp])
@@ -953,7 +952,7 @@ def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
             if bh.trapped:
                 raise KeyboardInterrupt
             target_rev_last = rev_num
-        shutil.rmtree(wc_target_tmp)
+        shell.rmtree(wc_target_tmp)
     return target_rev_last
 
 def disp_svn_log_summary(log_entry):
@@ -1013,7 +1012,7 @@ def real_main(args):
     # Check out a working copy of target_url if needed
     wc_exists = os.path.exists(wc_target)
     if wc_exists and not options.cont_from_break:
-        shutil.rmtree(wc_target)
+        shell.rmtree(wc_target)
         wc_exists = False
     if not wc_exists:
         ui.status("Checking-out _wc_target...", level=ui.VERBOSE)
