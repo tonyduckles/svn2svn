@@ -81,7 +81,7 @@ def status(msg, *args, **kwargs):
         msg = msg.encode('utf-8')
     color = kwargs.get('color', None)
     bold =  kwargs.get('bold',  None)
-    if color in _colors:
+    if color in _colors and os.name != 'nt':
         msg = '%s%s%s' % ("\x1b["+_colors[color]+(";1" if bold else "")+"m", msg, "\x1b[0m")
     stream.write(msg)
     stream.flush()
