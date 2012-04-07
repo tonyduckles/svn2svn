@@ -84,7 +84,8 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
             # If we don't have an excessive amount of individual changed paths, pass
             # those to the "svn commit" command. Else, pass nothing so we commit at
             # the root of the working-copy.
-            args += list(commit_paths)
+            for c_path in commit_paths:
+                args += [svnclient.safe_path(c_path)]
     rev_num = None
     if not options.dry_run:
         # Use BreakHandler class to temporarily redirect SIGINT handler, so that
@@ -140,7 +141,7 @@ def verify_commit(source_rev, target_rev, log_entry=None):
                 if path_is_dir:
                     if not d['action'] in 'AR':
                         continue
-                    child_paths = run_svn(["list", "--recursive", "-r", source_rev, source_url.rstrip("/")+"/"+path_offset+"@"+str(source_rev)])
+                    child_paths = run_svn(["list", "--recursive", "-r", source_rev, svnclient.safe_path(source_url.rstrip("/")+"/"+path_offset, source_rev)])
                     child_paths = child_paths.strip("\n").split("\n")
                     for child_path in child_paths:
                         if not child_path:
@@ -156,7 +157,7 @@ def verify_commit(source_rev, target_rev, log_entry=None):
                                 check_paths.append(working_path)
     if options.verify == 2:  # All paths
         ui.status("Verifying source revision %s (all)...", source_rev, level=ui.VERBOSE)
-        child_paths = run_svn(["list", "--recursive", "-r", source_rev, source_url+"@"+str(source_rev)])
+        child_paths = run_svn(["list", "--recursive", "-r", source_rev, svnclient.safe_path(source_url, source_rev)])
         child_paths = child_paths.strip("\n").split("\n")
         for child_path in child_paths:
             if not child_path:
@@ -194,8 +195,8 @@ def verify_commit(source_rev, target_rev, log_entry=None):
             if count % 500 == 0:
                 ui.status("...processed %s (%s of %s)..." % (count, count, count_total), level=ui.VERBOSE)
             ui.status("verify_commit: path_offset:%s", path_offset, level=ui.DEBUG, color='YELLOW')
-            source_log_entries = svnclient.run_svn_log(source_url.rstrip("/")+"/"+path_offset+"@"+str(source_rev), source_rev, 1, source_rev-source_rev_first+1)
-            target_log_entries = svnclient.run_svn_log(target_url.rstrip("/")+"/"+path_offset+"@"+str(target_rev), target_rev, 1, target_rev)
+            source_log_entries = svnclient.run_svn_log(svnclient.safe_path(source_url.rstrip("/")+"/"+path_offset), source_rev, 1, source_rev-source_rev_first+1)
+            target_log_entries = svnclient.run_svn_log(svnclient.safe_path(target_url.rstrip("/")+"/"+path_offset), target_rev, 1, target_rev)
             # Build a list of commits in source_log_entries which matches our
             # target path_offset.
             working_path = source_base+"/"+path_offset
@@ -325,7 +326,7 @@ def verify_commit(source_rev, target_rev, log_entry=None):
     # Ensure there are no "extra" files in the target side
     if options.verify == 2:
         target_paths = []
-        child_paths = run_svn(["list", "--recursive", "-r", target_rev, target_url+"@"+str(target_rev)])
+        child_paths = run_svn(["list", "--recursive", "-r", target_rev, svnclient.safe_path(target_url, target_rev)])
         child_paths = child_paths.strip("\n").split("\n")
         for child_path in child_paths:
             if not child_path:
@@ -387,13 +388,13 @@ def sync_svn_props(source_url, source_rev, path_offset):
     for prop in target_props:
         if prop not in source_props:
             # Remove any properties which exist in target but not source
-            run_svn(["propdel", prop, path_offset])
+            run_svn(["propdel", prop, svnclient.safe_path(path_offset)])
     for prop in source_props:
         if prop not in target_props or \
            source_props[prop] != target_props[prop]:
             # Set/update any properties which exist in source but not target or
             # whose value differs between source vs. target.
-            run_svn(["propset", prop, source_props[prop], path_offset])
+            run_svn(["propset", prop, source_props[prop], svnclient.safe_path(path_offset)])
 
 def in_svn(p, require_in_repo=False, prefix=""):
     """
@@ -591,16 +592,14 @@ def build_rev_map(target_url, target_end_rev, source_info):
                 if proc_count % 500 == 0:
                     ui.status("...processed %s (%s of %s)..." % (proc_count, target_rev, target_end_rev), level=ui.VERBOSE)
 
-def get_svn_dirlist(svn_path, rev_number = ""):
+def get_svn_dirlist(svn_path, rev_number=None):
     """
     Get a list of all the child contents (recusive) of the given folder path.
     """
     args = ["list"]
-    path = svn_path
-    if rev_number:
+    if rev_number is not None:
         args += ["-r", rev_number]
-        path += "@"+str(rev_number)
-    args += [path]
+    args += [svnclient.safe_path(svn_path, rev_number)]
     paths = run_svn(args, no_fail=True)
     paths = paths.strip("\n").split("\n") if len(paths)>1 else []
     return paths
@@ -703,16 +702,16 @@ def do_svn_add(source_url, path_offset, source_rev, source_ancestors, \
                 if path_in_svn:
                     # If local file is already under version-control, then this is a replace.
                     ui.status(prefix + ">> do_svn_add: pre-copy: local path already exists: %s", path_offset, level=ui.DEBUG, color='GREEN')
-                    run_svn(["update", path_offset])
-                    run_svn(["remove", "--force", path_offset])
-                run_svn(["copy", "-r", tgt_rev, join_path(target_url, copyfrom_offset)+"@"+str(tgt_rev), path_offset])
+                    run_svn(["update", svnclient.safe_path(path_offset)])
+                    run_svn(["remove", "--force", svnclient.safe_path(path_offset)])
+                run_svn(["copy", "-r", tgt_rev, svnclient.safe_path(join_path(target_url, copyfrom_offset), tgt_rev), svnclient.safe_path(path_offset)])
                 if is_dir:
                     # Export the final verison of all files in this folder.
                     add_path(export_paths, path_offset)
                 else:
                     # Export the final verison of this file.
                     run_svn(["export", "--force", "-r", source_rev,
-                             source_repos_url+join_path(source_base, path_offset)+"@"+str(source_rev), path_offset])
+                             svnclient.safe_path(source_repos_url+join_path(source_base, path_offset), source_rev), svnclient.safe_path(path_offset)])
                 if options.keep_prop:
                     sync_svn_props(source_url, source_rev, path_offset)
         else:
@@ -725,7 +724,7 @@ def do_svn_add(source_url, path_offset, source_rev, source_ancestors, \
         #       split-out to a shared tag?
         p_path = path_offset if is_dir else os.path.dirname(path_offset).strip() or None
         if p_path and not os.path.exists(p_path):
-            run_svn(["mkdir", p_path])
+            run_svn(["mkdir", svnclient.safe_path(p_path)])
         if not in_svn(path_offset, prefix=prefix+"  "):
             if is_dir:
                 # Export the final verison of all files in this folder.
@@ -734,9 +733,9 @@ def do_svn_add(source_url, path_offset, source_rev, source_ancestors, \
                 # Export the final verison of this file. We *need* to do this before running
                 # the "svn add", even if we end-up re-exporting this file again via export_paths.
                 run_svn(["export", "--force", "-r", source_rev,
-                         source_repos_url+join_path(source_base, path_offset)+"@"+str(source_rev), path_offset])
+                         svnclient.safe_path(source_repos_url+join_path(source_base, path_offset), source_rev), svnclient.safe_path(path_offset)])
             # If not already under version-control, then "svn add" this file/folder.
-            run_svn(["add", "--parents", path_offset])
+            run_svn(["add", "--parents", svnclient.safe_path(path_offset)])
         if options.keep_prop:
             sync_svn_props(source_url, source_rev, path_offset)
     if is_dir:
@@ -771,8 +770,8 @@ def do_svn_add_dir(source_url, path_offset, source_rev, source_ancestors, \
             path_is_dir = True if path[-1] == "/" else False
             working_path = join_path(path_offset, (path.rstrip('/') if path_is_dir else path)).lstrip('/')
             ui.status(" %s %s", 'D', join_path(source_base, working_path), level=ui.VERBOSE)
-            run_svn(["update", working_path])
-            run_svn(["remove", "--force", working_path])
+            run_svn(["update", svnclient.safe_path(working_path)])
+            run_svn(["remove", "--force", svnclient.safe_path(working_path)])
             # TODO: Does this handle deleted folders too? Wouldn't want to have a case
             #       where we only delete all files from folder but leave orphaned folder around.
 
@@ -836,8 +835,8 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
                 if path_is_dir:
                     # Need to "svn update" before "svn remove" in case child contents are at
                     # a higher rev than the (parent) path_offset.
-                    run_svn(["update", path_offset])
-                run_svn(["remove", "--force", path_offset])
+                    run_svn(["update", svnclient.safe_path(path_offset)])
+                run_svn(["remove", "--force", svnclient.safe_path(path_offset)])
             action = 'A'
 
         # Handle all the various action-types
@@ -867,7 +866,7 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
                 # Create (parent) directory if needed
                 p_path = path_offset if path_is_dir else os.path.dirname(path_offset).strip() or None
                 if p_path and not os.path.exists(p_path):
-                    run_svn(["mkdir", p_path])
+                    run_svn(["mkdir", svnclient.safe_path(p_path)])
                 # Export the entire added tree.
                 if path_is_dir:
                     # For directories, defer the (recurisve) "svn export". Might have a
@@ -883,11 +882,11 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
                     # Export the final verison of this file. We *need* to do this before running
                     # the "svn add", even if we end-up re-exporting this file again via export_paths.
                     run_svn(["export", "--force", "-r", source_rev,
-                             join_path(source_url, path_offset)+"@"+str(source_rev), path_offset])
+                             svnclient.safe_path(join_path(source_url, path_offset), source_rev), svnclient.safe_path(path_offset)])
                 if not in_svn(path_offset, prefix=prefix+"  "):
                     # Need to use in_svn here to handle cases where client committed the parent
                     # folder and each indiv sub-folder.
-                    run_svn(["add", "--parents", path_offset])
+                    run_svn(["add", "--parents", svnclient.safe_path(path_offset)])
                 if options.keep_prop:
                     sync_svn_props(source_url, source_rev, path_offset)
 
@@ -896,20 +895,20 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
                 # For dirs, need to "svn update" before "svn remove" because the final
                 # "svn commit" will fail if the parent (path_offset) is at a lower rev
                 # than any of the child contents. This needs to be a recursive update.
-                run_svn(["update", path_offset])
-            run_svn(["remove", "--force", path_offset])
+                run_svn(["update", svnclient.safe_path(path_offset)])
+            run_svn(["remove", "--force", svnclient.safe_path(path_offset)])
 
         elif action == 'M':
             if path_is_file:
                 run_svn(["export", "--force", "-N" , "-r", source_rev,
-                         join_path(source_url, path_offset)+"@"+str(source_rev), path_offset])
+                         svnclient.safe_path(join_path(source_url, path_offset), source_rev), svnclient.safe_path(path_offset)])
             if path_is_dir:
                 # For dirs, need to "svn update" before export/prop-sync because the
                 # final "svn commit" will fail if the parent is at a lower rev than
                 # child contents. Just need to update the rev-state of the dir (d['path']),
                 # don't need to recursively update all child contents.
                 # (??? is this the right reason?)
-                run_svn(["update", "-N", path_offset])
+                run_svn(["update", "-N", svnclient.safe_path(path_offset)])
             if options.keep_prop:
                 sync_svn_props(source_url, source_rev, path_offset)
 
@@ -921,7 +920,7 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
     if export_paths:
         for path_offset in export_paths:
             run_svn(["export", "--force", "-r", source_rev,
-                     join_path(source_url, path_offset)+"@"+str(source_rev), path_offset])
+                     svnclient.safe_path(join_path(source_url, path_offset), source_rev), svnclient.safe_path(path_offset)])
 
 def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
     """
@@ -937,13 +936,13 @@ def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
         # Add "padding" target revisions to keep source and target rev #'s identical
         if os.path.exists(wc_target_tmp):
             shell.rmtree(wc_target_tmp)
-        run_svn(["checkout", "-r", "HEAD", "--depth=empty", target_repos_url, wc_target_tmp])
+        run_svn(["checkout", "-r", "HEAD", "--depth=empty", svnclient.safe_path(target_repos_url, "HEAD"), svnclient.safe_path(wc_target_tmp)])
         for rev_num in range(int(target_rev_last)+1, int(source_rev)):
-            run_svn(["propset", "svn2svn:keep-revnum", rev_num, wc_target_tmp])
+            run_svn(["propset", "svn2svn:keep-revnum", rev_num, svnclient.safe_path(wc_target_tmp)])
             # Prevent Ctrl-C's during this inner part, so we'll always display
             # the "Commit revision ..." message if we ran a "svn commit".
             bh.enable()
-            output = run_svn(["commit", "-m", "", wc_target_tmp])
+            output = run_svn(["commit", "-m", "", svnclient.safe_path(wc_target_tmp)])
             rev_num_tmp = parse_svn_commit_rev(output) if output else None
             assert rev_num == rev_num_tmp
             ui.status("Committed revision %s (keep-revnum).", rev_num)
@@ -1027,7 +1026,7 @@ def real_main(args):
     if not options.cont_from_break:
         # Warn user if trying to start (non-continue) into a non-empty target path
         if not options.force_nocont:
-            top_paths = run_svn(["list", "-r", "HEAD", target_url])
+            top_paths = run_svn(["list", "-r", "HEAD", svnclient.safe_path(target_url, "HEAD")])
             if len(top_paths)>0:
                 print "Error: Trying to replay (non-continue-mode) into a non-empty target_url location. " \
                       "Use --force if you're sure this is what you want."
@@ -1057,7 +1056,7 @@ def real_main(args):
         disp_svn_log_summary(svnclient.get_one_svn_log_entry(source_repos_url, source_start_rev, source_start_rev))
         # Export and add file-contents from source_url@source_start_rev
         source_start_url = source_url if not source_ancestors else source_repos_url+source_ancestors[len(source_ancestors)-1]['copyfrom_path']
-        top_paths = run_svn(["list", "-r", source_start_rev, source_start_url+"@"+str(source_start_rev)])
+        top_paths = run_svn(["list", "-r", source_start_rev, svnclient.safe_path(source_start_url, source_start_rev)])
         top_paths = top_paths.strip("\n").split("\n")
         for path in top_paths:
             # For each top-level file/folder...
@@ -1070,10 +1069,10 @@ def real_main(args):
                 raise InternalError("Cannot replay history on top of pre-existing structure: %s" % join_path(source_start_url, path_offset))
             if path_is_dir and not os.path.exists(path_offset):
                 os.makedirs(path_offset)
-            run_svn(["export", "--force", "-r" , source_start_rev, join_path(source_start_url, path_offset)+"@"+str(source_start_rev), path_offset])
-            run_svn(["add", path_offset])
+            run_svn(["export", "--force", "-r" , source_start_rev, svnclient.safe_path(join_path(source_start_url, path_offset), source_start_rev), svnclient.safe_path(path_offset)])
+            run_svn(["add", svnclient.safe_path(path_offset)])
         # Update any properties on the newly added content
-        paths = run_svn(["list", "--recursive", "-r", source_start_rev, source_start_url+"@"+str(source_start_rev)])
+        paths = run_svn(["list", "--recursive", "-r", source_start_rev, svnclient.safe_path(source_start_url, source_start_rev)])
         paths = paths.strip("\n").split("\n")
         if options.keep_prop:
             sync_svn_props(source_start_url, source_start_rev, "")

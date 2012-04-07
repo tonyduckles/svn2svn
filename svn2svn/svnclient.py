@@ -7,6 +7,7 @@ import os
 import time
 import calendar
 import operator
+import urllib
 
 try:
     from xml.etree import cElementTree as ET
@@ -32,6 +33,20 @@ def strip_forbidden_xml_chars(xml_string):
     """
     return xml_string.translate(_identity_table, _forbidden_xml_chars)
 
+def safe_path(path, rev_number=None):
+    """
+    Build a path to pass as a SVN command-line arg.
+    """
+    # URL-escape URL's, but leave local WC paths alone
+    if "://" in path:
+        path = urllib.quote(path, ":/")
+    # Add peg revision
+    if rev_number is not None:
+        path += "@"+str(rev_number)
+    # Else, if path already contains an "@", add a trailing "@" to "escape" the earlier "@".
+    elif "@" in path:
+        path += "@"
+    return path
 
 def svn_date_to_timestamp(svn_date):
     """
@@ -181,7 +196,7 @@ def get_svn_rev(svn_url_or_wc, rev_number):
     """
     Evaluate a given SVN revision pattern, to map it to a discrete rev #.
     """
-    xml_string = run_svn(['info', '--xml', '-r', rev_number, svn_url_or_wc], fail_if_stderr=True)
+    xml_string = run_svn(['info', '--xml', '-r', rev_number, safe_path(svn_url_or_wc, rev_number)], fail_if_stderr=True)
     info = parse_svn_info_xml(xml_string)
     return info['revision']
 
@@ -193,9 +208,8 @@ def get_svn_info(svn_url_or_wc, rev_number=None):
     """
     args = ['info', '--xml']
     if rev_number is not None:
-        args += ["-r", rev_number, svn_url_or_wc+"@"+str(rev_number)]
-    else:
-        args += [svn_url_or_wc]
+        args += ["-r", rev_number]
+    args += [safe_path(svn_url_or_wc, rev_number)]
     xml_string = run_svn(args, fail_if_stderr=True)
     return parse_svn_info_xml(xml_string)
 
@@ -206,7 +220,7 @@ def svn_checkout(svn_url, checkout_dir, rev_number=None):
     args = ['checkout', '-q']
     if rev_number is not None:
         args += ['-r', rev_number]
-    args += [svn_url, checkout_dir]
+    args += [safe_path(svn_url, rev_number), checkout_dir]
     return run_svn(args)
 
 def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, get_changed_paths=True, get_revprops=False):
@@ -220,11 +234,8 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, ge
         args += ['-v']
     if get_revprops:
         args += ['--with-all-revprops']
-    url = str(svn_url_or_wc)
     args += ['-r', '%s:%s' % (rev_start, rev_end)]
-    if not "@" in svn_url_or_wc:
-        url = "%s@%s" % (svn_url_or_wc, str(max(rev_start, rev_end)))
-    args += ['--limit', str(limit), url]
+    args += ['--limit', str(limit), safe_path(svn_url_or_wc, max(rev_start, rev_end))]
     xml_string = run_svn(args)
     return parse_svn_log_xml(xml_string)
 
@@ -241,7 +252,7 @@ def get_svn_status(svn_wc, quiet=False, no_recursive=False):
         args += ['-v']
     if no_recursive:
         args += ['-N']
-    xml_string = run_svn(args + [svn_wc])
+    xml_string = run_svn(args + [safe_path(svn_wc)])
     return parse_svn_status_xml(xml_string, svn_wc, ignore_externals=True)
 
 def get_svn_versioned_files(svn_wc):
@@ -426,12 +437,9 @@ def get_prop_value(svn_url_or_wc, prop_name, rev_number=None):
     Get the value of a versioned property for the given path.
     """
     args = ['propget', '--xml']
-    url = str(svn_url_or_wc)
     if rev_number:
         args += ['-r', rev_number]
-        if not "@" in svn_url_or_wc:
-            url = "%s@%s" % (svn_url_or_wc, str(rev_number))
-    args += [prop_name, url]
+    args += [prop_name, safe_path(svn_url_or_wc, rev_number)]
     xml_string = run_svn(args)
     return parse_svn_propget_xml(xml_string)
 
@@ -441,12 +449,9 @@ def get_all_props(svn_url_or_wc, rev_number=None):
     """
     l = {}
     args = ['proplist', '--xml']
-    url = str(svn_url_or_wc)
     if rev_number:
         args += ['-r', rev_number]
-        if not "@" in svn_url_or_wc:
-            url = "%s@%s" % (svn_url_or_wc, str(rev_number))
-    args += [url]
+    args += [safe_path(svn_url_or_wc, rev_number)]
     xml_string = run_svn(args)
     props = parse_svn_proplist_xml(xml_string)
     for prop_name in props:

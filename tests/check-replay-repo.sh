@@ -33,13 +33,13 @@ echo ">> Checking file-contents..."
 cd $WCREF
 FILES=$(find . -type f | grep -v "\.svn")
 cd $PWD
-for file in $FILES; do
+echo "$FILES" | while read file; do
     fname=$(echo "$file" | sed 's/^\.\///')
     FILEREF="$WCREF/$fname"
     FILEDUP="$WCDUP/$fname"
     if [ -f "$FILEDUP" ]; then
-        chksum1=$(md5sum $FILEREF | cut -c1-32)
-        chksum2=$(md5sum $FILEDUP | cut -c1-32)
+        chksum1=$(md5sum "$FILEREF" | cut -c1-32)
+        chksum2=$(md5sum "$FILEDUP" | cut -c1-32)
         if [ "$chksum1" != "$chksum2" ]; then
             echo "Checksum mismatch: $fname"
             echo " $chksum1 $FILEREF"
