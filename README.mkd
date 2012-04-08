@@ -6,7 +6,8 @@ Features
 --------
 - **Meant for replaying history into an "empty target location**. This could be
   an empty target repo or simply an empty folder/branch in the target repo.
-- **Maintains logical history (when possible)**, e.g. uses "svn copy" for renames.
+- **Maintains logical history (ancestry) when possible**, e.g. uses "svn copy"
+  for renames.
 - **Maintains original commit messages**.
 - **Optionally maintain source commit authors (`svn:author`) and commit timestamps
   (`svn:date`)**.  Requires a "pre-revprop-change" hook script in the target
@@ -21,6 +22,14 @@ Features
   to give the ability to dynamically exclude or modify files as part
   of the replay.
 
+Requirements
+------------
+- **Python 2.6** or higher.
+- **Subversion 1.6** or higher.
+- Written for a UNIX-type environment, e.g. Linux, Mac OSX, etc. For
+  Windows-based usage, recommend using [Cygwin](http://www.cygwin.com/) for
+  best compatibility.
+
 Overview
 --------
 This is a utility for replicating the revision history from a source path in
@@ -34,19 +43,21 @@ history which is taking up a lot of disk-space and not serving a lot of purpose
 going forward.  You can this utility to replay/filter just the "/trunk" SVN
 history into a new repository, so that things like "svn log" and "svn blame"
 will still show the correct (logical) history/ancestry, even though we end-up
-generating new commits which will have newer commit-dates and revision #'s.
+generating new commits which will have newer commit-dates and revision #'s
+(_though this script can optionally maintain the original commit-dates and
+revision #'s if desired_).
 
-While this replay will obviously run faster if you're running between both
-a local source and target repositories, none of this *requires* direct
+While this replay process will obviously run faster if you're running between
+both a local source and target repositories, none of this *requires* direct
 access to the repo server. You could access both the source and target repo's
-over standard `http://`, `ssh://`, etc. methods.
+over standard `http://`, `svn://`, `svn+ssh://`, etc. methods.
 
 Usage
 -----
 See `svn2svn.py --help`:
 
     $ ./svn2svn.py --help
-    svn2svn, version 1.4.0
+    svn2svn, version 1.5.0
     <http://nynim.org/projects/svn2svn> <https://github.com/tonyduckles/svn2svn>
     
     Usage: svn2svn.py [OPTIONS] source_url target_url
