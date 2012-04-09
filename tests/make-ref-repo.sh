@@ -324,12 +324,15 @@ svn mkdir -q "Module2/My Folder"
 echo "Module2/My Folder/file@2x.txt" >> $WC/Module2/My\ Folder/file@2x.txt
 echo "Module2/My Folder/%some_file.txt" >> $WC/Module2/My\ Folder/%some_file.txt
 echo "Module2/My Folder/file%20test.txt" >> $WC/Module2/My\ Folder/file%20test.txt
+echo "Module2/My Folder/file test2.txt" >> $WC/Module2/My\ Folder/file\ test2.txt
 svn add -q Module2/My\ Folder/file@2x.txt@
 svn add -q Module2/My\ Folder/%some_file.txt
 svn add -q Module2/My\ Folder/file%20test.txt
+svn add -q Module2/My\ Folder/file\ test2.txt
 svn propset -q desc "file@2x" $WC/Module2/My\ Folder/file@2x.txt@
 svn propset -q desc "%some_file" $WC/Module2/My\ Folder/%some_file.txt
 svn propset -q desc "file%20test" $WC/Module2/My\ Folder/file%20test.txt
+svn propset -q desc "file test2" $WC/Module2/My\ Folder/file\ test2.txt
 svn_commit "Test 18: Add Module2/My Folder/*.txt"
 svn switch -q $TRUNK
 svn merge -q $BRANCH

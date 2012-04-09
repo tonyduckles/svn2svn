@@ -79,6 +79,11 @@ def parse_svn_info_xml(xml_string):
     if author_element is not None:
         d['last_changed_author'] = author_element.text
     d['last_changed_date'] = svn_date_to_timestamp(tree.find('.//commit/date').text)
+    # URL-decode "url" and "repos_url" values, since all paths passed
+    # to run_svn() should be filtered through safe_path() and we don't
+    # want to *double* URL-encode paths which are constructed used these values.
+    d['url'] = urllib.unquote(d['url'])
+    d['repos_url'] = urllib.unquote(d['repos_url'])
     return d
 
 def get_kind(svn_repos_url, svn_path, svn_rev, action, paths):

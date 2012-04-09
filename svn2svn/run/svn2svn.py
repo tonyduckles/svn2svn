@@ -371,7 +371,7 @@ def gen_tracking_revprops(source_rev):
     Build an array of svn2svn-specific source-tracking revprops.
     """
     revprops = [{'name':'svn2svn:source_uuid', 'value':source_repos_uuid},
-                {'name':'svn2svn:source_url',  'value':source_url},
+                {'name':'svn2svn:source_url',  'value':urllib.quote(source_url, ":/")},
                 {'name':'svn2svn:source_rev',  'value':source_rev}]
     return revprops
 
@@ -584,7 +584,7 @@ def build_rev_map(target_url, target_end_rev, source_info):
                     revprops[v['name']] = v['value']
             if revprops and \
                revprops['svn2svn:source_uuid'] == source_info['repos_uuid'] and \
-               revprops['svn2svn:source_url'] == source_info['url']:
+               revprops['svn2svn:source_url'] == urllib.quote(source_info['url'], ":/"):
                 source_rev = revprops['svn2svn:source_rev']
                 target_rev = log_entry['revision']
                 set_rev_map(source_rev, target_rev)
@@ -964,8 +964,12 @@ def disp_svn_log_summary(log_entry):
 
 def real_main(args):
     global source_url, target_url, rev_map
-    source_url = urllib.quote(args.pop(0).rstrip("/"),"/:")   # e.g. 'http://server/svn/source/trunk'
-    target_url = urllib.quote(args.pop(0).rstrip("/"),"/:")   # e.g. 'file:///svn/target/trunk'
+    # Use urllib.unquote() to URL-decode source_url/target_url values.
+    # All URLs passed to run_svn() should go through svnclient.safe_path()
+    # and we don't want to end-up *double* urllib.quote'ing if the user-
+    # supplied source/target URL's are already URL-encoded.
+    source_url = urllib.unquote(args.pop(0).rstrip("/"))   # e.g. 'http://server/svn/source/trunk'
+    target_url = urllib.unquote(args.pop(0).rstrip("/"))   # e.g. 'file:///svn/target/trunk'
     ui.status("options: %s", str(options), level=ui.DEBUG, color='GREEN')
 
     # Make sure that both the source and target URL's are valid
