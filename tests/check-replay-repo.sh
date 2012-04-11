@@ -1,22 +1,23 @@
-#!/bin/sh
+#!/bin/bash
 # Compare the reference (make-ref-repo.sh) and replay (make-replay-repo.sh)
 # repositories to check for any differences/problems with the svn2svn replay.
 
 PWD=$(pwd)
+PWDURL=$(echo "file://$PWD" | sed 's/\ /%20/g')
 WCREF="$PWD/_wc_ref"
 WCDUP="$PWD/_wc_target"
 found_diff=0
 
 # Create a working-copy for the reference repo
 # Note: We assume that the replay working-copy ("_wc_target") still exists from make-replay-repo.sh
-#svn co -q file://$PWD/_repo_ref $WCREF
-svn co -q file://$PWD/_repo_ref/trunk $WCREF
-#svn co -q file://$PWD/_repo_ref/trunk/Module2/ProjectB $WCREF
+#svn co -q $PWDURL/_repo_ref "$WCREF"
+svn co -q $PWDURL/_repo_ref/trunk "$WCREF"
+#svn co -q $PWDURL/_repo_ref/trunk/Module2/ProjectB "$WCREF"
 
 # Check if the final list of files is the same
 echo ">> Checking file-list..."
-cd $WCREF && FILESREF=$(find . -type f | grep -v "\.svn") && cd $PWD
-cd $WCDUP && FILESDUP=$(find . -type f | grep -v "\.svn") && cd $PWD
+cd "$WCREF" && FILESREF=$(find . -type f | grep -v "\.svn") && cd "$PWD"
+cd "$WCDUP" && FILESDUP=$(find . -type f | grep -v "\.svn") && cd "$PWD"
 if [ "$FILESREF" != "$FILESDUP" ]; then
     echo "$FILESREF" > _files_ref.txt
     echo "$FILESDUP" > _files_replay.txt
@@ -30,9 +31,9 @@ echo ""
 
 # Check if the final file-contents is the same
 echo ">> Checking file-contents..."
-cd $WCREF
+cd "$WCREF"
 FILES=$(find . -type f | grep -v "\.svn")
-cd $PWD
+cd "$PWD"
 echo "$FILES" | while read file; do
     fname=$(echo "$file" | sed 's/^\.\///')
     FILEREF="$WCREF/$fname"
@@ -54,7 +55,7 @@ done
 echo ""
 
 # Clean-up
-rm -rf $WCREF
+rm -rf "$WCREF"
 
 # If we found any differences, exit with an error-code
 [ "$found_diff" -eq 1 ] && exit 1
