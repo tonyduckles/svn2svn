@@ -495,3 +495,35 @@ def export(svn_url, rev_number, path, non_recursive=False, force=False):
         args += ['--force']
     args += [safe_path(svn_url, rev_number), safe_path(path)]
     run_svn(args)
+
+def _parse_svn_list_xml(xml_string):
+    """
+    Parse the XML output from an "svn list" command and extract list
+    of contents.
+    """
+    l = []
+    xml_string = _strip_forbidden_xml_chars(xml_string)
+    tree = ET.fromstring(xml_string)
+    d = []
+    for entry in tree.findall('.//entry'):
+        d = { 'path': entry.find('.//name').text,
+              'kind': entry.get('kind') }
+        l.append(d)
+    return l
+
+def list(svn_url_or_wc, rev_number=None, recursive=False):
+    """
+    List the contents of a path as they exist in the repo.
+    """
+    args = ['list', '--xml']
+    if rev_number:
+        args += ['-r', rev_number]
+    if recursive:
+        args += ['-R']
+    args += [safe_path(svn_url_or_wc, rev_number)]
+    xml_string = run_svn(args, no_fail=True)
+    # If svn_url_or_wc is a WC path which hasn't been committed yet,
+    # 'svn list' won't return a valid XML document. Gracefully short-circuit.
+    if not "</lists>" in xml_string:
+        return []
+    return _parse_svn_list_xml(xml_string)

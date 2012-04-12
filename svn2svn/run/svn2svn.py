@@ -141,14 +141,10 @@ def verify_commit(source_rev, target_rev, log_entry=None):
                 if path_is_dir:
                     if not d['action'] in 'AR':
                         continue
-                    child_paths = run_svn(["list", "--recursive", "-r", source_rev, svnclient.safe_path(source_url.rstrip("/")+"/"+path_offset, source_rev)])
-                    child_paths = child_paths.strip("\n").split("\n")
-                    for child_path in child_paths:
-                        if not child_path:
-                            continue
-                        # Directories have a trailing slash in the "svn list" output
-                        child_path_is_dir = True if child_path[-1] == "/" else False
-                        child_path_offset = child_path.rstrip('/') if child_path_is_dir else child_path
+                    child_paths = svnclient.list(source_url.rstrip("/")+"/"+path_offset, source_rev, recursive=True)
+                    for p in child_paths:
+                        child_path_is_dir = True if p['kind'] == 'dir' else False
+                        child_path_offset = p['path']
                         if not child_path_is_dir:
                             # Only check files
                             working_path = (path_offset+"/" if path_offset else "") + child_path_offset
@@ -157,14 +153,10 @@ def verify_commit(source_rev, target_rev, log_entry=None):
                                 check_paths.append(working_path)
     if options.verify == 2:  # All paths
         ui.status("Verifying source revision %s (all)...", source_rev, level=ui.VERBOSE)
-        child_paths = run_svn(["list", "--recursive", "-r", source_rev, svnclient.safe_path(source_url, source_rev)])
-        child_paths = child_paths.strip("\n").split("\n")
-        for child_path in child_paths:
-            if not child_path:
-                continue
-            # Directories have a trailing slash in the "svn list" output
-            child_path_is_dir = True if child_path[-1] == "/" else False
-            child_path_offset = child_path.rstrip('/') if child_path_is_dir else child_path
+        child_paths = svnclient.list(source_url, source_rev, recursive=True)
+        for p in child_paths:
+            child_path_is_dir = True if p['kind'] == 'dir' else False
+            child_path_offset = p['path']
             if not child_path_is_dir:
                 # Only check files
                 ui.status("verify_commit [mode=all]: check_paths.append('%s')", child_path_offset, level=ui.DEBUG, color='GREEN')
@@ -321,19 +313,16 @@ def verify_commit(source_rev, target_rev, log_entry=None):
                 ui.status(" (%s/%s) Verify path: FAIL: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA, color='RED')
                 ui.status("VerificationError: Found one or more *extra* target_revs: path_offset='%s', target_revs='%s'", path_offset, rmndr_list, color='RED')
                 error_cnt +=1
-            ui.status(" (%s/%s) Verify path: OK: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA)
+            else:
+                ui.status(" (%s/%s) Verify path: OK: %s", str(count).rjust(len(str(count_total))), count_total, path_offset, level=ui.EXTRA)
 
     # Ensure there are no "extra" files in the target side
     if options.verify == 2:
         target_paths = []
-        child_paths = run_svn(["list", "--recursive", "-r", target_rev, svnclient.safe_path(target_url, target_rev)])
-        child_paths = child_paths.strip("\n").split("\n")
-        for child_path in child_paths:
-            if not child_path:
-                continue
-            # Directories have a trailing slash in the "svn list" output
-            child_path_is_dir = True if child_path[-1] == "/" else False
-            child_path_offset = child_path.rstrip('/') if child_path_is_dir else child_path
+        child_paths = svnclient.list(target_url, target_rev, recursive=True)
+        for p in child_paths:
+            child_path_is_dir = True if p['kind'] == 'dir' else False
+            child_path_offset = p['path']
             if not child_path_is_dir:
                 target_paths.append(child_path_offset)
         # Compare
@@ -592,18 +581,6 @@ def build_rev_map(target_url, target_end_rev, source_info):
                 if proc_count % 500 == 0:
                     ui.status("...processed %s (%s of %s)..." % (proc_count, target_rev, target_end_rev), level=ui.VERBOSE)
 
-def get_svn_dirlist(svn_path, rev_number=None):
-    """
-    Get a list of all the child contents (recusive) of the given folder path.
-    """
-    args = ["list"]
-    if rev_number is not None:
-        args += ["-r", rev_number]
-    args += [svnclient.safe_path(svn_path, rev_number)]
-    paths = run_svn(args, no_fail=True)
-    paths = paths.strip("\n").split("\n") if len(paths)>1 else []
-    return paths
-
 def path_in_list(paths, path):
     for p in paths:
         if is_child_path(path, p):
@@ -749,24 +726,23 @@ def do_svn_add_dir(source_url, path_offset, source_rev, source_ancestors, \
     # Get the directory contents, to compare between the local WC (target_url) vs. the remote repo (source_url)
     # TODO: paths_local won't include add'd paths because "svn ls" lists the contents of the
     #       associated remote repo folder. (Is this a problem?)
-    paths_local =  get_svn_dirlist(path_offset)
-    paths_remote = get_svn_dirlist(join_path(source_url, path_offset), source_rev)
+    paths_local =  svnclient.list(path_offset)
+    paths_remote = svnclient.list(join_path(source_url, path_offset), source_rev)
     ui.status(prefix + ">> do_svn_add_dir: paths_local:  %s", str(paths_local),  level=ui.DEBUG, color='GREEN')
     ui.status(prefix + ">> do_svn_add_dir: paths_remote: %s", str(paths_remote), level=ui.DEBUG, color='GREEN')
     # Update files/folders which exist in remote but not local
-    for path in paths_remote:
-        path_is_dir = True if path[-1] == "/" else False
-        working_path = join_path(path_offset, (path.rstrip('/') if path_is_dir else path)).lstrip('/')
+    for p in paths_remote:
+        path_is_dir = True if p['kind'] == 'dir' else False
+        working_path = join_path(path_offset, p['path']).lstrip('/')
         #print "working_path:%s = path_offset:%s + path:%s" % (working_path, path_offset, path)
         if not working_path in skip_paths:
             do_svn_add(source_url, working_path, source_rev, source_ancestors,
                        parent_copyfrom_path, parent_copyfrom_rev,
                        export_paths, path_is_dir, skip_paths, prefix+"  ")
     # Remove files/folders which exist in local but not remote
-    for path in paths_local:
-        if not path in paths_remote:
-            path_is_dir = True if path[-1] == "/" else False
-            working_path = join_path(path_offset, (path.rstrip('/') if path_is_dir else path)).lstrip('/')
+    for p in paths_local:
+        if not p in paths_remote:
+            working_path = join_path(path_offset, p['path']).lstrip('/')
             ui.status(" %s %s", 'D', join_path(source_base, working_path), level=ui.VERBOSE)
             svnclient.update(working_path)
             svnclient.remove(working_path, force=True)
@@ -1025,7 +1001,7 @@ def real_main(args):
     if not options.cont_from_break:
         # Warn user if trying to start (non-continue) into a non-empty target path
         if not options.force_nocont:
-            top_paths = run_svn(["list", "-r", "HEAD", svnclient.safe_path(target_url, "HEAD")])
+            top_paths = svnclient.list(target_url, "HEAD")
             if len(top_paths)>0:
                 print "Error: Trying to replay (non-continue-mode) into a non-empty target_url location. " \
                       "Use --force if you're sure this is what you want."
@@ -1055,15 +1031,11 @@ def real_main(args):
         disp_svn_log_summary(svnclient.get_one_svn_log_entry(source_repos_url, source_start_rev, source_start_rev))
         # Export and add file-contents from source_url@source_start_rev
         source_start_url = source_url if not source_ancestors else source_repos_url+source_ancestors[len(source_ancestors)-1]['copyfrom_path']
-        top_paths = run_svn(["list", "-r", source_start_rev, svnclient.safe_path(source_start_url, source_start_rev)])
-        top_paths = top_paths.strip("\n").split("\n")
-        for path in top_paths:
+        top_paths = svnclient.list(source_start_url, source_start_rev)
+        for p in top_paths:
             # For each top-level file/folder...
-            if not path:
-                continue
-            # Directories have a trailing slash in the "svn list" output
-            path_is_dir = True if path[-1] == "/" else False
-            path_offset = path.rstrip('/') if path_is_dir else path
+            path_is_dir = True if p['kind'] == "dir" else False
+            path_offset = p['path']
             if in_svn(path_offset, prefix="  "):
                 raise InternalError("Cannot replay history on top of pre-existing structure: %s" % join_path(source_start_url, path_offset))
             if path_is_dir and not os.path.exists(path_offset):
@@ -1071,16 +1043,11 @@ def real_main(args):
             svnclient.export(join_path(source_start_url, path_offset), source_start_rev, path_offset, force=True)
             run_svn(["add", svnclient.safe_path(path_offset)])
         # Update any properties on the newly added content
-        paths = run_svn(["list", "--recursive", "-r", source_start_rev, svnclient.safe_path(source_start_url, source_start_rev)])
-        paths = paths.strip("\n").split("\n")
+        paths = svnclient.list(source_start_url, source_start_rev, recursive=True)
         if options.keep_prop:
             sync_svn_props(source_start_url, source_start_rev, "")
-        for path in paths:
-            if not path:
-                continue
-            # Directories have a trailing slash in the "svn list" output
-            path_is_dir = True if path[-1] == "/" else False
-            path_offset = path.rstrip('/') if path_is_dir else path
+        for p in paths:
+            path_offset = p['path']
             ui.status(" A %s", join_path(source_base, path_offset), level=ui.VERBOSE)
             if options.keep_prop:
                 sync_svn_props(source_start_url, source_start_rev, path_offset)
