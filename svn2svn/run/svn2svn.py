@@ -195,8 +195,8 @@ def verify_commit(source_rev, target_rev, log_entry=None):
             if count % 500 == 0:
                 ui.status("...processed %s (%s of %s)..." % (count, count, count_total), level=ui.VERBOSE)
             ui.status("verify_commit: path_offset:%s", path_offset, level=ui.DEBUG, color='YELLOW')
-            source_log_entries = svnclient.run_svn_log(svnclient.safe_path(source_url.rstrip("/")+"/"+path_offset), source_rev, 1, source_rev-source_rev_first+1)
-            target_log_entries = svnclient.run_svn_log(svnclient.safe_path(target_url.rstrip("/")+"/"+path_offset), target_rev, 1, target_rev)
+            source_log_entries = svnclient.run_svn_log(source_url.rstrip("/")+"/"+path_offset, source_rev, 1, source_rev-source_rev_first+1)
+            target_log_entries = svnclient.run_svn_log(target_url.rstrip("/")+"/"+path_offset, target_rev, 1, target_rev)
             # Build a list of commits in source_log_entries which matches our
             # target path_offset.
             working_path = source_base+"/"+path_offset
@@ -255,8 +255,8 @@ def verify_commit(source_rev, target_rev, log_entry=None):
                             is_diff = True if sum1 <> sum2 else False
                         if not is_diff:
                             # Check for property changes
-                            props1 = svnclient.get_all_props(source_repos_url+working_path, source_rev_tmp)
-                            props2 = svnclient.get_all_props(source_repos_url+working_path_next, source_rev_tmp-1)
+                            props1 = svnclient.propget_all(source_repos_url+working_path, source_rev_tmp)
+                            props2 = svnclient.propget_all(source_repos_url+working_path_next, source_rev_tmp-1)
                             # Ignore changes to "svn:mergeinfo", since we don't copy that
                             if 'svn:mergeinfo' in props1: del props1['svn:mergeinfo']
                             if 'svn:mergeinfo' in props2: del props2['svn:mergeinfo']
@@ -380,8 +380,8 @@ def sync_svn_props(source_url, source_rev, path_offset):
     Carry-forward any unversioned properties from the source repo to the
     target WC.
     """
-    source_props = svnclient.get_all_props(join_path(source_url, path_offset),  source_rev)
-    target_props = svnclient.get_all_props(path_offset)
+    source_props = svnclient.propget_all(join_path(source_url, path_offset),  source_rev)
+    target_props = svnclient.propget_all(path_offset)
     if 'svn:mergeinfo' in source_props:
         # Never carry-forward "svn:mergeinfo"
         del source_props['svn:mergeinfo']
@@ -403,7 +403,7 @@ def in_svn(p, require_in_repo=False, prefix=""):
     With SVN 1.7 and beyond, WC-NG means only a single top-level ".svn" at the root of the working-copy.
     Use "svn status" to check the status of the file/folder.
     """
-    entries = svnclient.get_svn_status(p, no_recursive=True)
+    entries = svnclient.status(p, non_recursive=True)
     if not entries:
         return False
     d = entries[0]
@@ -702,16 +702,15 @@ def do_svn_add(source_url, path_offset, source_rev, source_ancestors, \
                 if path_in_svn:
                     # If local file is already under version-control, then this is a replace.
                     ui.status(prefix + ">> do_svn_add: pre-copy: local path already exists: %s", path_offset, level=ui.DEBUG, color='GREEN')
-                    run_svn(["update", svnclient.safe_path(path_offset)])
-                    run_svn(["remove", "--force", svnclient.safe_path(path_offset)])
+                    svnclient.update(path_offset)
+                    svnclient.remove(path_offset, force=True)
                 run_svn(["copy", "-r", tgt_rev, svnclient.safe_path(join_path(target_url, copyfrom_offset), tgt_rev), svnclient.safe_path(path_offset)])
                 if is_dir:
                     # Export the final verison of all files in this folder.
                     add_path(export_paths, path_offset)
                 else:
                     # Export the final verison of this file.
-                    run_svn(["export", "--force", "-r", source_rev,
-                             svnclient.safe_path(source_repos_url+join_path(source_base, path_offset), source_rev), svnclient.safe_path(path_offset)])
+                    svnclient.export(source_repos_url+join_path(source_base, path_offset), source_rev, path_offset, force=True)
                 if options.keep_prop:
                     sync_svn_props(source_url, source_rev, path_offset)
         else:
@@ -732,8 +731,7 @@ def do_svn_add(source_url, path_offset, source_rev, source_ancestors, \
             else:
                 # Export the final verison of this file. We *need* to do this before running
                 # the "svn add", even if we end-up re-exporting this file again via export_paths.
-                run_svn(["export", "--force", "-r", source_rev,
-                         svnclient.safe_path(source_repos_url+join_path(source_base, path_offset), source_rev), svnclient.safe_path(path_offset)])
+                svnclient.export(source_repos_url+join_path(source_base, path_offset), source_rev, path_offset, force=True)
             # If not already under version-control, then "svn add" this file/folder.
             run_svn(["add", "--parents", svnclient.safe_path(path_offset)])
         if options.keep_prop:
@@ -770,8 +768,8 @@ def do_svn_add_dir(source_url, path_offset, source_rev, source_ancestors, \
             path_is_dir = True if path[-1] == "/" else False
             working_path = join_path(path_offset, (path.rstrip('/') if path_is_dir else path)).lstrip('/')
             ui.status(" %s %s", 'D', join_path(source_base, working_path), level=ui.VERBOSE)
-            run_svn(["update", svnclient.safe_path(working_path)])
-            run_svn(["remove", "--force", svnclient.safe_path(working_path)])
+            svnclient.update(working_path)
+            svnclient.remove(working_path, force=True)
             # TODO: Does this handle deleted folders too? Wouldn't want to have a case
             #       where we only delete all files from folder but leave orphaned folder around.
 
@@ -835,8 +833,8 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
                 if path_is_dir:
                     # Need to "svn update" before "svn remove" in case child contents are at
                     # a higher rev than the (parent) path_offset.
-                    run_svn(["update", svnclient.safe_path(path_offset)])
-                run_svn(["remove", "--force", svnclient.safe_path(path_offset)])
+                    svnclient.update(path_offset)
+                svnclient.remove(path_offset, force=True)
             action = 'A'
 
         # Handle all the various action-types
@@ -881,8 +879,7 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
                 else:
                     # Export the final verison of this file. We *need* to do this before running
                     # the "svn add", even if we end-up re-exporting this file again via export_paths.
-                    run_svn(["export", "--force", "-r", source_rev,
-                             svnclient.safe_path(join_path(source_url, path_offset), source_rev), svnclient.safe_path(path_offset)])
+                    svnclient.export(join_path(source_url, path_offset), source_rev, path_offset, force=True)
                 if not in_svn(path_offset, prefix=prefix+"  "):
                     # Need to use in_svn here to handle cases where client committed the parent
                     # folder and each indiv sub-folder.
@@ -895,20 +892,19 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
                 # For dirs, need to "svn update" before "svn remove" because the final
                 # "svn commit" will fail if the parent (path_offset) is at a lower rev
                 # than any of the child contents. This needs to be a recursive update.
-                run_svn(["update", svnclient.safe_path(path_offset)])
-            run_svn(["remove", "--force", svnclient.safe_path(path_offset)])
+                svnclient.update(path_offset)
+            svnclient.remove(path_offset, force=True)
 
         elif action == 'M':
             if path_is_file:
-                run_svn(["export", "--force", "-N" , "-r", source_rev,
-                         svnclient.safe_path(join_path(source_url, path_offset), source_rev), svnclient.safe_path(path_offset)])
+                svnclient.export(join_path(source_url, path_offset), source_rev, path_offset, force=True, non_recursive=True)
             if path_is_dir:
                 # For dirs, need to "svn update" before export/prop-sync because the
                 # final "svn commit" will fail if the parent is at a lower rev than
                 # child contents. Just need to update the rev-state of the dir (d['path']),
                 # don't need to recursively update all child contents.
                 # (??? is this the right reason?)
-                run_svn(["update", "-N", svnclient.safe_path(path_offset)])
+                svnclient.update(path_offset, non_recursive=True)
             if options.keep_prop:
                 sync_svn_props(source_url, source_rev, path_offset)
 
@@ -919,8 +915,7 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
     # Export the final version of all add'd paths from source_url
     if export_paths:
         for path_offset in export_paths:
-            run_svn(["export", "--force", "-r", source_rev,
-                     svnclient.safe_path(join_path(source_url, path_offset), source_rev), svnclient.safe_path(path_offset)])
+            svnclient.export(join_path(source_url, path_offset), source_rev, path_offset, force=True)
 
 def keep_revnum(source_rev, target_rev_last, wc_target_tmp):
     """
@@ -973,9 +968,9 @@ def real_main(args):
     ui.status("options: %s", str(options), level=ui.DEBUG, color='GREEN')
 
     # Make sure that both the source and target URL's are valid
-    source_info = svnclient.get_svn_info(source_url)
+    source_info = svnclient.info(source_url)
     assert is_child_path(source_url, source_info['repos_url'])
-    target_info = svnclient.get_svn_info(target_url)
+    target_info = svnclient.info(target_url)
     assert is_child_path(target_url, target_info['repos_url'])
 
     # Init global vars
@@ -989,12 +984,12 @@ def real_main(args):
 
     # Init start and end revision
     try:
-        source_start_rev = svnclient.get_svn_rev(source_repos_url, options.rev_start if options.rev_start else 1)
+        source_start_rev = svnclient.get_rev(source_repos_url, options.rev_start if options.rev_start else 1)
     except ExternalCommandFailed:
         print "Error: Invalid start source revision value: %s" % (options.rev_start)
         sys.exit(1)
     try:
-        source_end_rev   = svnclient.get_svn_rev(source_repos_url, options.rev_end   if options.rev_end   else "HEAD")
+        source_end_rev   = svnclient.get_rev(source_repos_url, options.rev_end   if options.rev_end   else "HEAD")
     except ExternalCommandFailed:
         print "Error: Invalid end source revision value: %s" % (options.rev_end)
         sys.exit(1)
@@ -1073,7 +1068,7 @@ def real_main(args):
                 raise InternalError("Cannot replay history on top of pre-existing structure: %s" % join_path(source_start_url, path_offset))
             if path_is_dir and not os.path.exists(path_offset):
                 os.makedirs(path_offset)
-            run_svn(["export", "--force", "-r" , source_start_rev, svnclient.safe_path(join_path(source_start_url, path_offset), source_start_rev), svnclient.safe_path(path_offset)])
+            svnclient.export(join_path(source_start_url, path_offset), source_start_rev, path_offset, force=True)
             run_svn(["add", svnclient.safe_path(path_offset)])
         # Update any properties on the newly added content
         paths = run_svn(["list", "--recursive", "-r", source_start_rev, svnclient.safe_path(source_start_url, source_start_rev)])
@@ -1111,7 +1106,7 @@ def real_main(args):
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
         ui.status("", level=ui.VERBOSE)
 
-    svn_vers_t = svnclient.get_svn_client_version()
+    svn_vers_t = svnclient.version()
     svn_vers = float(".".join(map(str, svn_vers_t[0:2])))
 
     # Load SVN log starting from source_start_rev + 1

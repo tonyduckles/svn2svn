@@ -26,7 +26,7 @@ _forbidden_xml_chars = "".join(
 )
 
 
-def strip_forbidden_xml_chars(xml_string):
+def _strip_forbidden_xml_chars(xml_string):
     """
     Given an XML string, strips forbidden characters as per the XML spec.
     (these are all control characters except 0x9, 0xA and 0xD).
@@ -48,7 +48,7 @@ def safe_path(path, rev_number=None):
         path += "@"
     return path
 
-def svn_date_to_timestamp(svn_date):
+def _svn_date_to_timestamp(svn_date):
     """
     Parse an SVN date as read from the XML output and return the corresponding
     timestamp.
@@ -60,13 +60,13 @@ def svn_date_to_timestamp(svn_date):
     time_tuple = time.strptime(date, "%Y-%m-%dT%H:%M:%S")
     return calendar.timegm(time_tuple)
 
-def parse_svn_info_xml(xml_string):
+def _parse_svn_info_xml(xml_string):
     """
     Parse the XML output from an "svn info" command and extract useful information
     as a dict.
     """
     d = {}
-    xml_string = strip_forbidden_xml_chars(xml_string)
+    xml_string = _strip_forbidden_xml_chars(xml_string)
     tree = ET.fromstring(xml_string)
     entry = tree.find('.//entry')
     d['url'] = entry.find('url').text
@@ -78,7 +78,7 @@ def parse_svn_info_xml(xml_string):
     author_element = tree.find('.//commit/author')
     if author_element is not None:
         d['last_changed_author'] = author_element.text
-    d['last_changed_date'] = svn_date_to_timestamp(tree.find('.//commit/date').text)
+    d['last_changed_date'] = _svn_date_to_timestamp(tree.find('.//commit/date').text)
     # URL-decode "url" and "repos_url" values, since all paths passed
     # to run_svn() should be filtered through safe_path() and we don't
     # want to *double* URL-encode paths which are constructed used these values.
@@ -113,16 +113,16 @@ def get_kind(svn_repos_url, svn_path, svn_rev, action, paths):
             # If no parent copy-from's, then we should be able to check this path in
             # the preceeding revision.
             info_rev -= 1
-    info = get_svn_info(svn_repos_url+info_path, info_rev)
-    return info['kind']
+    svn_info = info(svn_repos_url+info_path, info_rev)
+    return svn_info['kind']
 
-def parse_svn_log_xml(xml_string):
+def _parse_svn_log_xml(xml_string):
     """
     Parse the XML output from an "svn log" command and extract useful information
     as a list of dicts (one per log changeset).
     """
     l = []
-    xml_string = strip_forbidden_xml_chars(xml_string)
+    xml_string = _strip_forbidden_xml_chars(xml_string)
     tree = ET.fromstring(xml_string)
     for entry in tree.findall('logentry'):
         d = {}
@@ -138,7 +138,7 @@ def parse_svn_log_xml(xml_string):
         msg = entry.find('msg')
         d['author'] = author is not None and author.text or "No author"
         d['date_raw'] = date.text if date is not None else None
-        d['date'] = svn_date_to_timestamp(date.text) if date is not None else None
+        d['date'] = _svn_date_to_timestamp(date.text) if date is not None else None
         d['message'] = msg is not None and msg.text and msg.text.replace('\r\n', '\n').replace('\n\r', '\n').replace('\r', '\n') or ""
         paths = []
         for path in entry.findall('.//paths/path'):
@@ -162,7 +162,7 @@ def parse_svn_log_xml(xml_string):
         l.append(d)
     return l
 
-def parse_svn_status_xml(xml_string, base_dir=None, ignore_externals=False):
+def _parse_svn_status_xml(xml_string, base_dir=None, ignore_externals=False):
     """
     Parse the XML output from an "svn status" command and extract useful info
     as a list of dicts (one per status entry).
@@ -170,7 +170,7 @@ def parse_svn_status_xml(xml_string, base_dir=None, ignore_externals=False):
     if base_dir:
         base_dir = os.path.normcase(base_dir)
     l = []
-    xml_string = strip_forbidden_xml_chars(xml_string)
+    xml_string = _strip_forbidden_xml_chars(xml_string)
     tree = ET.fromstring(xml_string)
     for entry in tree.findall('.//entry'):
         d = {}
@@ -197,26 +197,26 @@ def parse_svn_status_xml(xml_string, base_dir=None, ignore_externals=False):
         l.append(d)
     return l
 
-def get_svn_rev(svn_url_or_wc, rev_number):
+def get_rev(svn_url_or_wc, rev_number):
     """
     Evaluate a given SVN revision pattern, to map it to a discrete rev #.
     """
     xml_string = run_svn(['info', '--xml', '-r', rev_number, safe_path(svn_url_or_wc, rev_number)], fail_if_stderr=True)
-    info = parse_svn_info_xml(xml_string)
+    info = _parse_svn_info_xml(xml_string)
     return info['revision']
 
-def get_svn_info(svn_url_or_wc, rev_number=None):
+def info(svn_url_or_wc, rev_number=None):
     """
     Get SVN information for the given URL or working copy, with an optionally
     specified revision number.
-    Returns a dict as created by parse_svn_info_xml().
+    Returns a dict as created by _parse_svn_info_xml().
     """
     args = ['info', '--xml']
     if rev_number is not None:
         args += ["-r", rev_number]
     args += [safe_path(svn_url_or_wc, rev_number)]
     xml_string = run_svn(args, fail_if_stderr=True)
-    return parse_svn_info_xml(xml_string)
+    return _parse_svn_info_xml(xml_string)
 
 def svn_checkout(svn_url, checkout_dir, rev_number=None):
     """
@@ -242,9 +242,9 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, ge
     args += ['-r', '%s:%s' % (rev_start, rev_end)]
     args += ['--limit', str(limit), safe_path(svn_url_or_wc, max(rev_start, rev_end))]
     xml_string = run_svn(args)
-    return parse_svn_log_xml(xml_string)
+    return _parse_svn_log_xml(xml_string)
 
-def get_svn_status(svn_wc, quiet=False, no_recursive=False):
+def status(svn_wc, quiet=False, non_recursive=False):
     """
     Get SVN status information about the given working copy.
     """
@@ -255,17 +255,17 @@ def get_svn_status(svn_wc, quiet=False, no_recursive=False):
         args += ['-q']
     else:
         args += ['-v']
-    if no_recursive:
+    if non_recursive:
         args += ['-N']
     xml_string = run_svn(args + [safe_path(svn_wc)])
-    return parse_svn_status_xml(xml_string, svn_wc, ignore_externals=True)
+    return _parse_svn_status_xml(xml_string, svn_wc, ignore_externals=True)
 
 def get_svn_versioned_files(svn_wc):
     """
     Get the list of versioned files in the SVN working copy.
     """
     contents = []
-    for e in get_svn_status(svn_wc):
+    for e in status(svn_wc):
         if e['path'] and e['type'] == 'normal':
             contents.append(e['path'])
     return contents
@@ -325,11 +325,11 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
     Use run/svn2svn.py:find_svn_ancestors() to pass in the 'ancestors' array
     so that we can correctly re-trace ancestry here.
     """
-    info = get_svn_info(svn_url)
-    svn_repos_url = info['repos_url']
+    svn_info = info(svn_url)
+    svn_repos_url = svn_info['repos_url']
     #print "iter_svn_log_entries: %s %s:%s" % (svn_url, first_rev, last_rev)
     if last_rev == "HEAD":
-        last_rev = info['revision']
+        last_rev = svn_info['revision']
     if int(first_rev) == 1:
         start_log = get_first_svn_log_entry(svn_url, first_rev, last_rev, stop_on_copy=stop_on_copy, get_changed_paths=False)
         if start_log['revision'] > first_rev:
@@ -397,7 +397,7 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
 
 _svn_client_version = None
 
-def get_svn_client_version():
+def version():
     """
     Returns the SVN client version as a tuple.
 
@@ -412,32 +412,32 @@ def get_svn_client_version():
     return _svn_client_version
 
 
-def parse_svn_propget_xml(xml_string):
+def _parse_svn_propget_xml(xml_string):
     """
     Parse the XML output from an "svn propget" command and extract useful
     information as a dict.
     """
     d = {}
-    xml_string = strip_forbidden_xml_chars(xml_string)
+    xml_string = _strip_forbidden_xml_chars(xml_string)
     tree = ET.fromstring(xml_string)
     prop = tree.find('.//property')
     d['name'] = prop.get('name')
     d['value'] = prop is not None and prop.text and prop.text.replace('\r\n', '\n').replace('\n\r', '\n').replace('\r', '\n') or ""
     return d
 
-def parse_svn_proplist_xml(xml_string):
+def _parse_svn_proplist_xml(xml_string):
     """
     Parse the XML output from an "svn proplist" command and extract list
     of property-names.
     """
     l = []
-    xml_string = strip_forbidden_xml_chars(xml_string)
+    xml_string = _strip_forbidden_xml_chars(xml_string)
     tree = ET.fromstring(xml_string)
     for prop in tree.findall('.//property'):
         l.append(prop.get('name'))
     return l
 
-def get_prop_value(svn_url_or_wc, prop_name, rev_number=None):
+def propget(svn_url_or_wc, prop_name, rev_number=None):
     """
     Get the value of a versioned property for the given path.
     """
@@ -446,9 +446,9 @@ def get_prop_value(svn_url_or_wc, prop_name, rev_number=None):
         args += ['-r', rev_number]
     args += [prop_name, safe_path(svn_url_or_wc, rev_number)]
     xml_string = run_svn(args)
-    return parse_svn_propget_xml(xml_string)
+    return _parse_svn_propget_xml(xml_string)
 
-def get_all_props(svn_url_or_wc, rev_number=None):
+def propget_all(svn_url_or_wc, rev_number=None):
     """
     Get the values of all versioned properties for the given path.
     """
@@ -458,8 +458,40 @@ def get_all_props(svn_url_or_wc, rev_number=None):
         args += ['-r', rev_number]
     args += [safe_path(svn_url_or_wc, rev_number)]
     xml_string = run_svn(args)
-    props = parse_svn_proplist_xml(xml_string)
+    props = _parse_svn_proplist_xml(xml_string)
     for prop_name in props:
-        d = get_prop_value(svn_url_or_wc, prop_name, rev_number)
+        d = propget(svn_url_or_wc, prop_name, rev_number)
         l[d['name']] = d['value']
     return l
+
+def update(path, non_recursive=False):
+    """
+    Update a path in a working-copy.
+    """
+    args = ['update', '--ignore-externals']
+    if non_recursive:
+        args += ['-N']
+    args += [safe_path(path)]
+    run_svn(args)
+
+def remove(path, force=False):
+    """
+    Remove a file/directory in a working-copy.
+    """
+    args = ['remove']
+    if force:
+        args += ['--force']
+    args += [safe_path(path)]
+    run_svn(args)
+
+def export(svn_url, rev_number, path, non_recursive=False, force=False):
+    """
+    Export a file from a repo to a local path.
+    """
+    args = ['export', '--ignore-externals', '-r', rev_number]
+    if non_recursive:
+        args += ['-N']
+    if force:
+        args += ['--force']
+    args += [safe_path(svn_url, rev_number), safe_path(path)]
+    run_svn(args)
