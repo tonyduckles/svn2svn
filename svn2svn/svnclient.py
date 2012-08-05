@@ -322,7 +322,7 @@ def iter_svn_log_entries(svn_url, first_rev, last_rev, stop_on_copy=False, get_c
         --> would yield r5, i.e. the _initial_ creation
       svn log --stop-on-copy --limit 1 -r 1:HEAD "path/to/file"
         --> would yield r5000, i.e. the _re-creation_
-    Use run/svn2svn.py:find_svn_ancestors() to pass in the 'ancestors' array
+    Use run/svnreplay.py:find_svn_ancestors() to pass in the 'ancestors' array
     so that we can correctly re-trace ancestry here.
     """
     svn_info = info(svn_url)

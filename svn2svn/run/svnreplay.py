@@ -2,12 +2,12 @@
 Replicate (replay) changesets from one SVN repository to another.
 """
 
-from .. import base_version, full_version
-from .. import ui
-from .. import shell
-from .. import svnclient
-from ..shell import run_svn,run_shell_command
-from ..errors import (ExternalCommandFailed, UnsupportedSVNAction, InternalError, VerificationError)
+from svn2svn import base_version, full_version
+from svn2svn import ui
+from svn2svn import shell
+from svn2svn import svnclient
+from svn2svn.shell import run_svn,run_shell_command
+from svn2svn.errors import (ExternalCommandFailed, UnsupportedSVNAction, InternalError, VerificationError)
 from parse import HelpFormatter
 from breakhandler import BreakHandler
 
@@ -1151,7 +1151,7 @@ Examples:
   Create a copy of only /trunk from source repo, starting at r5000
   $ svnadmin create /svn/target
   $ svn mkdir -m 'Add trunk' file:///svn/target/trunk
-  $ svn2svn -av -r 5000 http://server/source/trunk file:///svn/target/trunk
+  $ svnreplay -av -r 5000 http://server/source/trunk file:///svn/target/trunk
     1. The target_url will be checked-out to ./_wc_target
     2. The first commit to http://server/source/trunk at/after r5000 will be
        exported & added into _wc_target
@@ -1162,7 +1162,7 @@ Examples:
        logical ancestry where possible.
 
   Use continue-mode (-c) to pick-up where the last run left-off
-  $ svn2svn -avc http://server/source/trunk file:///svn/target/trunk
+  $ svnreplay -avc http://server/source/trunk file:///svn/target/trunk
     1. The target_url will be checked-out to ./_wc_target, if not already
        checked-out
     2. All new revisions affecting http://server/source/trunk starting from

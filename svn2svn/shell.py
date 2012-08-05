@@ -1,6 +1,6 @@
 """ Shell functions """
 
-from . import ui
+from svn2svn import ui
 from errors import ExternalCommandFailed
 
 import os

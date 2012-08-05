@@ -54,13 +54,13 @@ over standard `http://`, `svn://`, `svn+ssh://`, etc. methods.
 
 Usage
 -----
-See `svn2svn.py --help`:
+See `svnreplay.py --help`:
 
-    $ ./svn2svn.py --help
-    svn2svn, version 1.5.0
+    $ ./svnreplay.py --help
+    svn2svn, version 1.6.0
     <http://nynim.org/projects/svn2svn> <https://github.com/tonyduckles/svn2svn>
     
-    Usage: svn2svn.py [OPTIONS] source_url target_url
+    Usage: svnreplay.py [OPTIONS] source_url target_url
     
     Replicate (replay) history from one SVN repository to another. Maintain
     logical ancestry wherever possible, so that 'svn log' on the replayed repo
@@ -70,7 +70,7 @@ See `svn2svn.py --help`:
       Create a copy of only /trunk from source repo, starting at r5000
       $ svnadmin create /svn/target
       $ svn mkdir -m 'Add trunk' file:///svn/target/trunk
-      $ svn2svn -av -r 5000 http://server/source/trunk file:///svn/target/trunk
+      $ svnreplay -av -r 5000 http://server/source/trunk file:///svn/target/trunk
         1. The target_url will be checked-out to ./_wc_target
         2. The first commit to http://server/source/trunk at/after r5000 will be
            exported & added into _wc_target
@@ -81,7 +81,7 @@ See `svn2svn.py --help`:
            logical ancestry where possible.
     
       Use continue-mode (-c) to pick-up where the last run left-off
-      $ svn2svn -avc http://server/source/trunk file:///svn/target/trunk
+      $ svnreplay -avc http://server/source/trunk file:///svn/target/trunk
         1. The target_url will be checked-out to ./_wc_target, if not already
            checked-out
         2. All new revisions affecting http://server/source/trunk starting from
@@ -152,7 +152,7 @@ Examples
 
     $ svnadmin create /svn/target
     $ svn mkdir -m 'Add trunk' file:///svn/target/trunk
-    $ svn2svn -av -r 5000 http://server/source/trunk file:///svn/target/trunk
+    $ svnreplay -av -r 5000 http://server/source/trunk file:///svn/target/trunk
 
 1. The `target_url` will be checked-out to `./_wc_target`.
 2. The first commit to `http://server/source/trunk` at/after r5000 will be
@@ -165,7 +165,7 @@ Examples
 
 **Use continue-mode (-c) to pick-up where the last run left-off**
 
-    $ svn2svn -avc http://server/source/trunk file:///svn/target/trunk
+    $ svnreplay -avc http://server/source/trunk file:///svn/target/trunk
 
 1. The `target_url` will be checked-out to `./_wc_target`, if not already
    checked-out
