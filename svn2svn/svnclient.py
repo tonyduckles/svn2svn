@@ -25,6 +25,7 @@ _forbidden_xml_chars = "".join(
     set(map(chr, range(32))) - set('\x09\x0A\x0D')
 )
 
+valid_svn_actions = "MARD"   # The list of known SVN action abbr's, from "svn log"
 
 def _strip_forbidden_xml_chars(xml_string):
     """
