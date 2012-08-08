@@ -34,6 +34,8 @@ def real_main(args):
     else:
         ui.status("No ancestor-chain found: %s", repos_root+repos_path+"@"+str(options.revision))
 
+    return 0
+
 def main():
     # Defined as entry point. Must be callable without arguments.
     usage = "svn2svn, version %s\n" % str(full_version) + \

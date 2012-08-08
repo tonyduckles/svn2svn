@@ -811,12 +811,12 @@ def real_main(args):
         source_start_rev = svnclient.get_rev(source_repos_url, options.rev_start if options.rev_start else 1)
     except ExternalCommandFailed:
         print "Error: Invalid start source revision value: %s" % (options.rev_start)
-        sys.exit(1)
+        return 1
     try:
         source_end_rev   = svnclient.get_rev(source_repos_url, options.rev_end   if options.rev_end   else "HEAD")
     except ExternalCommandFailed:
         print "Error: Invalid end source revision value: %s" % (options.rev_end)
-        sys.exit(1)
+        return 1
     ui.status("Using source revision range %s:%s", source_start_rev, source_end_rev, level=ui.VERBOSE)
 
     # TODO: If options.keep_date, should we try doing a "svn propset" on an *existing* revision
@@ -853,7 +853,7 @@ def real_main(args):
             if len(top_paths)>0:
                 print "Error: Trying to replay (non-continue-mode) into a non-empty target_url location. " \
                       "Use --force if you're sure this is what you want."
-                sys.exit(1)
+                return 1
         # Get the first log entry at/after source_start_rev, which is where
         # we'll do the initial import from.
         source_ancestors = find_svn_ancestors(source_repos_url, source_base, source_end_rev, prefix="  ")
@@ -915,7 +915,7 @@ def real_main(args):
         build_rev_map(target_url, target_rev_last, source_info)
         if not rev_map:
             print "Error: Called with continue-mode, but no already-replayed source history found in target_url."
-            sys.exit(1)
+            return 1
         source_start_rev = int(max(rev_map, key=rev_map.get))
         assert source_start_rev
         ui.status("Continuing from source revision %s.", source_start_rev, level=ui.VERBOSE)
@@ -928,6 +928,7 @@ def real_main(args):
     source_ancestors = find_svn_ancestors(source_repos_url, source_base, source_end_rev, prefix="  ")
     it_log_entries = svnclient.iter_svn_log_entries(source_url, source_start_rev+1, source_end_rev, get_revprops=True, ancestors=source_ancestors) if source_start_rev < source_end_rev else []
     source_rev_last = source_start_rev
+    exit_code = 0
 
     try:
         for log_entry in it_log_entries:
@@ -942,7 +943,7 @@ def real_main(args):
                 if source_rev < target_rev_last:
                     print "Error: Last target revision (r%s) is equal-or-higher than starting source revision (r%s). " \
                         "Cannot use --keep-revnum mode." % (target_rev_last, source_start_rev)
-                    sys.exit(1)
+                    return 1
                 target_rev_last = keep_revnum(source_rev, target_rev_last, wc_target_tmp)
             disp_svn_log_summary(log_entry)
             # Process all the changed-paths in this log entry
@@ -971,11 +972,13 @@ def real_main(args):
                 verify_commit(source_rev_last, target_rev_last)
 
     except KeyboardInterrupt:
+        exit_code = 1
         print "\nStopped by user."
         print "\nCleaning-up..."
         run_svn(["cleanup"])
         full_svn_revert()
     except:
+        exit_code = 1
         print "\nCommand failed with following error:\n"
         traceback.print_exc()
         print "\nCleaning-up..."
@@ -984,6 +987,8 @@ def real_main(args):
         full_svn_revert()
     finally:
         print "\nFinished at source revision %s%s." % (source_rev_last, " (dry-run)" if options.dry_run else "")
+
+    return exit_code
 
 def main():
     # Defined as entry point. Must be callable without arguments.
