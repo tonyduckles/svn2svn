@@ -1,6 +1,7 @@
 *.pyc
 *.pyo
+tests/_file*
 tests/_repo*
 tests/_wc*
-tests/_dup_wc
+tests/test-results
 *.swp
