@@ -10,9 +10,9 @@ test_expect_failure () {
 		say >&3 "checking known breakage: $2"
 		if test_run_ "$2" expecting_failure
 		then
-			test_known_broken_ok_ "$1"
+			test_failure_ "$1"
 		else
-			test_known_broken_failure_ "$1"
+			test_ok_ "$1"
 		fi
 	fi
 	echo >&3 ""
