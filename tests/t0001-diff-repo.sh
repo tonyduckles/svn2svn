@@ -4,7 +4,7 @@ test_description='Test diff-repo.sh
 '
 . ./test-lib.sh
 
-PWD=$(pwd)
+PWD=${TEST_DIRECTORY:-.}
 PWDURL=$(echo "file://$PWD" | sed 's/\ /%20/g')
 REPO="$PWD/_repo_tmp"
 REPO2="$PWD/_repo_tmp2"
@@ -35,7 +35,7 @@ test_expect_failure \
 rsync -aq $PWD/_repo_tmp/ $PWD/_repo_tmp2
 
 test_expect_success \
-    "diff-repo: REPO1/trunk == REPO2/trunk" \
+    "diff-repo: REPO1/trunk == REPO2/trunk (identical)" \
     "./diff-repo.sh $REPOURL/trunk $REPO2URL/trunk"
 
 rm -rf "$WC"
@@ -46,7 +46,7 @@ svn -q add "$WC/Module/ProjectA/FileA3.txt"
 svn ci -q -m "Second commit" "$WC"
 
 test_expect_failure \
-    "diff-repo: REPO1/trunk == REPO2/trunk" \
+    "diff-repo: REPO1/trunk != REPO2/trunk (changed)" \
     "./diff-repo.sh $REPOURL/trunk $REPO2URL/trunk"
 
 rm -rf "$REPO" "$REPO2" "$WC"
