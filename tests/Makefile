@@ -15,8 +15,11 @@ all: $(DEFAULT_TEST_TARGET)
 test: pre-clean $(TEST_LINT)
 	$(MAKE) aggregate-results-and-cleanup
 
-$(T):
+$(T): _repo_ref
 	@echo "*** $@ ***"; '$(SHELL_PATH_SQ)' $@ $(SVN2SVN_TEST_OPTS)
+
+_repo_ref:
+	./make-ref-repo.sh
 
 pre-clean:
 	$(RM) -r test-results
