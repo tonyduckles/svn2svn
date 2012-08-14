@@ -20,7 +20,11 @@ svn mkdir -q -m "Add $OFFSET" $REPOURL$OFFSET
 
 test_expect_success \
     "svnreplay _repo_ref$OFFSET _repo_replay$OFFSET" \
-    "$SVNREPLAY -a \"$PWDURL/_repo_ref$OFFSET\" \"$PWDURL/_repo_replay$OFFSET\""
+    "$SVNREPLAY -av \"$PWDURL/_repo_ref$OFFSET\" \"$PWDURL/_repo_replay$OFFSET\""
+
+test_expect_success \
+    "svnreplay _repo_ref$OFFSET _repo_replay$OFFSET (verify-all)" \
+    "$SVNREPLAY -avcX \"$PWDURL/_repo_ref$OFFSET\" \"$PWDURL/_repo_replay$OFFSET\""
 
 test_expect_success \
     "diff-repo _repo_ref$OFFSET _repo_replay$OFFSET" \
