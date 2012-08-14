@@ -26,6 +26,7 @@ pre-clean:
 
 clean:
 	$(RM) -r test-results
+	$(RM) -r _wc_*
 
 test-lint: test-lint-duplicates test-lint-executable
 
