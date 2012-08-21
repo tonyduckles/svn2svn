@@ -49,7 +49,12 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
     """
     Given an SVN log entry and an optional list of changed paths, do an svn commit.
     """
-    # TODO: Run optional external shell hook here, for doing pre-commit filtering
+    if options.beforecommit:
+        # Run optional external shell hook here, for doing pre-commit filtering
+        # $1 = Path to working copy
+        # $2 = Source revision #
+        args = [os.getcwd(), log_entry['revision']]
+        run_shell_command(options.beforecommit, args=args)
     # Display the _wc_target "svn status" info if running in -vv (or higher) mode
     if ui.get_level() >= ui.EXTRA:
         ui.status(">> commit_from_svn_log_entry: Pre-commit _wc_target status:", level=ui.EXTRA, color='CYAN')
@@ -1025,47 +1030,50 @@ Examples:
     parser = optparse.OptionParser(usage, description=description,
                 formatter=HelpFormatter(), version="%prog "+str(full_version))
     parser.add_option("-v", "--verbose", dest="verbosity", action="count", default=1,
-                      help="enable additional output (use -vv or -vvv for more)")
+                      help="Enable additional output (use -vv or -vvv for more).")
     parser.add_option("-a", "--archive", action="store_true", dest="archive", default=False,
-                      help="archive/mirror mode; same as -UDP (see REQUIRE's below)\n"
-                           "maintain same commit author, same commit time, and file/dir properties")
+                      help="Archive/mirror mode; same as -UDP (see REQUIRES below).\n"
+                           "Maintain same commit author, same commit time, and file/dir properties.")
     parser.add_option("-U", "--keep-author", action="store_true", dest="keep_author", default=False,
-                      help="maintain same commit authors (svn:author) as source\n"
-                           "(REQUIRES 'pre-revprop-change' hook script to allow 'svn:author' changes)")
+                      help="Maintain same commit authors (svn:author) as source.\n"
+                           "(REQUIRES 'pre-revprop-change' hook script to allow 'svn:author' changes.)")
     parser.add_option("-D", "--keep-date", action="store_true", dest="keep_date", default=False,
-                      help="maintain same commit time (svn:date) as source\n"
-                           "(REQUIRES 'pre-revprop-change' hook script to allow 'svn:date' changes)")
+                      help="Maintain same commit time (svn:date) as source.\n"
+                           "(REQUIRES 'pre-revprop-change' hook script to allow 'svn:date' changes.)")
     parser.add_option("-P", "--keep-prop", action="store_true", dest="keep_prop", default=False,
-                      help="maintain same file/dir SVN properties as source")
+                      help="Maintain same file/dir SVN properties as source.")
     parser.add_option("-R", "--keep-revnum", action="store_true", dest="keep_revnum", default=False,
-                      help="maintain same rev #'s as source. creates placeholder target "
-                            "revisions (by modifying a 'svn2svn:keep-revnum' property at the root of the target repo)")
+                      help="Maintain same rev #'s as source. creates placeholder target "
+                            "revisions (by modifying a 'svn2svn:keep-revnum' property at the root of the target repo).")
     parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
-                      help="continue from last source commit to target (based on svn2svn:* revprops)")
+                      help="Continue from last source commit to target (based on svn2svn:* revprops).")
     parser.add_option("-f", "--force", action="store_true", dest="force_nocont",
-                      help="allow replaying into a non-empty target folder")
+                      help="Allow replaying into a non-empty target folder.")
     parser.add_option("-r", "--revision", type="string", dest="revision", metavar="ARG",
-                      help="revision range to replay from source_url\n"
+                      help="Revision range to replay from source_url.\n"
                            "A revision argument can be one of:\n"
-                           "   START        start rev # (end will be 'HEAD')\n"
-                           "   START:END    start and ending rev #'s\n"
+                           "   START        Start rev # (end will be 'HEAD')\n"
+                           "   START:END    Start and ending rev #'s\n"
                            "Any revision # formats which SVN understands are "
                            "supported, e.g. 'HEAD', '{2010-01-31}', etc.")
     parser.add_option("-u", "--log-author", action="store_true", dest="log_author", default=False,
-                      help="append source commit author to replayed commit mesages")
+                      help="Append source commit author to replayed commit mesages.")
     parser.add_option("-d", "--log-date", action="store_true", dest="log_date", default=False,
-                      help="append source commit time to replayed commit messages")
+                      help="Append source commit time to replayed commit messages.")
     parser.add_option("-l", "--limit", type="int", dest="entries_proc_limit", metavar="NUM",
-                      help="maximum number of source revisions to process")
+                      help="Maximum number of source revisions to process.")
     parser.add_option("-n", "--dry-run", action="store_true", dest="dry_run", default=False,
-                      help="process next source revision but don't commit changes to "
-                           "target working-copy (forces --limit=1)")
+                      help="Process next source revision but don't commit changes to "
+                           "target working-copy (forces --limit=1).")
     parser.add_option("-x", "--verify",     action="store_const", const=1, dest="verify",
-                      help="verify ancestry and content for changed paths in commit after every target commit or last target commit")
+                      help="Verify ancestry and content for changed paths in commit after every target commit or last target commit.")
     parser.add_option("-X", "--verify-all", action="store_const", const=2, dest="verify",
-                      help="verify ancestry and content for entire target_url tree after every target commit or last target commit")
+                      help="Verify ancestry and content for entire target_url tree after every target commit or last target commit.")
+    parser.add_option("--pre-commit", type="string", dest="beforecommit", metavar="CMD",
+                      help="Run the given shell script before each replayed commit, e.g. "
+                           "to modify file-content during replay.")
     parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
-                      help="enable debugging output (same as -vvv)")
+                      help="Enable debugging output (same as -vvv).")
     global options
     options, args = parser.parse_args()
     if len(args) != 2:
