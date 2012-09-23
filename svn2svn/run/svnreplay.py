@@ -466,10 +466,10 @@ def do_svn_add(source_url, path_offset, source_rev, source_ancestors, \
     4. svn mv /branches/fix1/Proj2/file1.txt /branches/fix1/Proj2/file2.txt  " Rename file inside renamed folder
     5. svn co /trunk && svn merge /branches/fix1
     After the merge and commit, "svn log -v" with show a delete of /trunk/Proj1
-    and and add of /trunk/Proj2 copy-from /branches/fix1/Proj2. If we were just
-    to do a straight "svn export+add" based on the /branches/fix1/Proj2 folder,
-    we'd lose the logical history that Proj2/file2.txt is really a descendant
-    of Proj1/file1.txt.
+    and and add of /trunk/Proj2 copy-from /branches/fix1/Proj2. If we just did
+    a straight "svn export+add" based on the /branches/fix1/Proj2 folder, we'd
+    lose the logical history that Proj2/file2.txt is really a descendant of
+    Proj1/file1.txt.
 
     'path_offset' is the offset from source_base to the file to check ancestry for,
       e.g. 'projectA/file1.txt'. path = source_repos_url + source_base + path_offset.
@@ -1071,7 +1071,8 @@ Examples:
                       help="Verify ancestry and content for entire target_url tree after every target commit or last target commit.")
     parser.add_option("--pre-commit", type="string", dest="beforecommit", metavar="CMD",
                       help="Run the given shell script before each replayed commit, e.g. "
-                           "to modify file-content during replay.")
+                           "to modify file-content during replay.\n"
+                           "Called as: CMD [wc_path] [source_rev]")
     parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
                       help="Enable debugging output (same as -vvv).")
     global options
