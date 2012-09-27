@@ -1043,12 +1043,12 @@ Examples:
     parser.add_option("-P", "--keep-prop", action="store_true", dest="keep_prop", default=False,
                       help="Maintain same file/dir SVN properties as source.")
     parser.add_option("-R", "--keep-revnum", action="store_true", dest="keep_revnum", default=False,
-                      help="Maintain same rev #'s as source. creates placeholder target "
+                      help="Maintain same rev #'s as source. Creates placeholder target "
                             "revisions (by modifying a 'svn2svn:keep-revnum' property at the root of the target repo).")
     parser.add_option("-c", "--continue", action="store_true", dest="cont_from_break",
                       help="Continue from last source commit to target (based on svn2svn:* revprops).")
     parser.add_option("-f", "--force", action="store_true", dest="force_nocont",
-                      help="Allow replaying into a non-empty target folder.")
+                      help="Allow replaying into a non-empty target-repo folder.")
     parser.add_option("-r", "--revision", type="string", dest="revision", metavar="ARG",
                       help="Revision range to replay from source_url.\n"
                            "A revision argument can be one of:\n"

@@ -57,7 +57,7 @@ Usage
 See `svnreplay.py --help`:
 
     $ ./svnreplay.py --help
-    svn2svn, version 1.6.0
+    svn2svn, version 1.7.0
     <http://nynim.org/projects/svn2svn> <https://github.com/tonyduckles/svn2svn>
     
     Usage: svnreplay.py [OPTIONS] source_url target_url
@@ -104,12 +104,12 @@ See `svnreplay.py --help`:
                             (REQUIRES 'pre-revprop-change' hook script to allow
                             'svn:date' changes.)
       -P, --keep-prop       Maintain same file/dir SVN properties as source.
-      -R, --keep-revnum     Maintain same rev #'s as source. creates placeholder
+      -R, --keep-revnum     Maintain same rev #'s as source. Creates placeholder
                             target revisions (by modifying a 'svn2svn:keep-revnum'
                             property at the root of the target repo).
       -c, --continue        Continue from last source commit to target (based on
                             svn2svn:* revprops).
-      -f, --force           Allow replaying into a non-empty target folder.
+      -f, --force           Allow replaying into a non-empty target-repo folder.
       -r, --revision=ARG    Revision range to replay from source_url.
                             A revision argument can be one of:
                                START        Start rev # (end will be 'HEAD')
@@ -129,6 +129,7 @@ See `svnreplay.py --help`:
                             after every target commit or last target commit.
           --pre-commit=CMD  Run the given shell script before each replayed
                             commit, e.g. to modify file-content during replay.
+                            Called as: CMD [wc_path] [source_rev]
           --debug           Enable debugging output (same as -vvv).
 
 Side Effects
