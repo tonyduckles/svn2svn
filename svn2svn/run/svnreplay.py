@@ -57,7 +57,7 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
         run_shell_command(options.beforecommit, args=args)
     # Display the _wc_target "svn status" info if running in -vv (or higher) mode
     if ui.get_level() >= ui.EXTRA:
-        ui.status(">> commit_from_svn_log_entry: Pre-commit _wc_target status:", level=ui.EXTRA, color='CYAN')
+        ui.status(">> commit_from_svn_log_entry: Pre-commit wc_target status:", level=ui.EXTRA, color='CYAN')
         ui.status(run_svn(["status"]), level=ui.EXTRA, color='CYAN')
     # This will use the local timezone for displaying commit times
     timestamp = int(log_entry['date'])
@@ -829,8 +829,8 @@ def real_main(args):
     #       before doing first replay-commit?
 
     target_rev_last =  target_info['revision']   # Last revision # in the target repo
-    wc_target = os.path.abspath('_wc_target')
-    wc_target_tmp = os.path.abspath('_wc_target_tmp')
+    wc_target = options.wc_path if options.wc_path else os.path.abspath('_wc_target')
+    wc_target_tmp = wc_target + '_tmp'
     num_entries_proc = 0
     commit_count = 0
     source_rev = None
@@ -842,12 +842,12 @@ def real_main(args):
         shell.rmtree(wc_target)
         wc_exists = False
     if not wc_exists:
-        ui.status("Checking-out _wc_target...", level=ui.VERBOSE)
+        ui.status("Checking-out wc_target: %s ...", wc_target, level=ui.VERBOSE)
         svnclient.svn_checkout(target_url, wc_target)
     os.chdir(wc_target)
     if wc_exists:
         # If using an existing WC, make sure it's clean ("svn revert")
-        ui.status("Cleaning-up _wc_target...", level=ui.VERBOSE)
+        ui.status("Cleaning-up wc_target: %s ...", wc_target, level=ui.VERBOSE)
         run_svn(["cleanup"])
         full_svn_revert()
 
@@ -1073,6 +1073,8 @@ Examples:
                       help="Run the given shell script before each replayed commit, e.g. "
                            "to modify file-content during replay.\n"
                            "Called as: CMD [wc_path] [source_rev]")
+    parser.add_option("--wc", type="string", dest="wc_path", metavar="WCPATH",
+                      help='Path to target WC to create and use. Defaults to "./_wc_target".')
     parser.add_option("--debug", dest="verbosity", const=ui.DEBUG, action="store_const",
                       help="Enable debugging output (same as -vvv).")
     global options
