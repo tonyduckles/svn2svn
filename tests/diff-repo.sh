@@ -7,8 +7,8 @@
 }
 
 PWD=$(pwd)
-WC1="$PWD/_wc_tmp1"
-WC2="$PWD/_wc_tmp2"
+WC1="$PWD/_wc_tmp1_$$"
+WC2="$PWD/_wc_tmp2_$$"
 found_diff=0
 
 # Create a working-copy for the reference repo

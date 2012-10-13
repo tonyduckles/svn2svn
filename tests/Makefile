@@ -1,11 +1,14 @@
 # Run tests
 
-#SVN2SVN_TEST_OPTS=--verbose --debug
 SHELL_PATH ?= $(SHELL)
 RM ?= rm -f
+PROVE ?= prove
 DEFAULT_TEST_TARGET ?= test
 
-# Shell quote;
+#SVN2SVN_TEST_OPTS=--verbose --debug
+SVN2SVN_PROVE_OPTS ?= --timer --jobs 10
+
+# Shell quote
 SHELL_PATH_SQ = $(subst ','\'',$(SHELL_PATH))
 
 T = $(sort $(wildcard t[0-9][0-9][0-9][0-9]-*.sh))
@@ -14,6 +17,10 @@ all: $(DEFAULT_TEST_TARGET)
 
 test: pre-clean $(TEST_LINT)
 	$(MAKE) aggregate-results-and-cleanup
+
+prove: pre-clean _repo_ref $(TEST_LINT)
+	@echo "*** prove ***"; $(PROVE) --exec '$(SHELL_PATH_SQ)' $(SVN2SVN_PROVE_OPTS) $(T) :: $(SVN2SVN_TEST_OPTS)
+	$(MAKE) clean
 
 $(T): _repo_ref
 	@echo "*** $@ ***"; '$(SHELL_PATH_SQ)' $@ $(SVN2SVN_TEST_OPTS)
@@ -27,6 +34,7 @@ pre-clean:
 clean:
 	$(RM) -r test-results
 	$(RM) -r _wc_*
+	$(RM) -r _repo_t*
 
 test-lint: test-lint-duplicates test-lint-executable
 
