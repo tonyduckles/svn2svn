@@ -58,7 +58,7 @@ See `svnreplay.py --help`:
 
     $ ./svnreplay.py --help
     svn2svn, version 1.7.0
-    <http://nynim.org/projects/svn2svn> <https://github.com/tonyduckles/svn2svn>
+    <http://nynim.org/code/svn2svn> <https://github.com/tonyduckles/svn2svn>
     
     Usage: svnreplay.py [OPTIONS] source_url target_url
     
@@ -196,7 +196,7 @@ the majority of the code.
 
 Links
 -----
-* Introduction: "**[svn2svn: Replaying SVN History](http://nynim.org/blog/2012/02/01/svn2svn-replaying-svn-history/)**"
-* Project page: [http://nynim.org/projects/svn2svn](http://nynim.org/projects/svn2svn)
+* Introduction: **[svn2svn: Replaying SVN History](http://nynim.org/blog/2012/02/01/svn2svn-replaying-svn-history/)**
+* Project page: [http://nynim.org/code/svn2svn](http://nynim.org/code/svn2svn)
 * Source code @ Github: [https://github.com/tonyduckles/svn2svn](https://github.com/tonyduckles/svn2svn)
 * Source code @ git.nynim.org [http://git.nynim.org/svn2svn.git](http://git.nynim.org/svn2svn.git)

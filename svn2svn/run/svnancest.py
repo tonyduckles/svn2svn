@@ -39,7 +39,7 @@ def real_main(args):
 def main():
     # Defined as entry point. Must be callable without arguments.
     usage = "svn2svn, version %s\n" % str(full_version) + \
-            "<http://nynim.org/projects/svn2svn> <https://github.com/tonyduckles/svn2svn>\n\n" + \
+            "<http://nynim.org/code/svn2svn> <https://github.com/tonyduckles/svn2svn>\n\n" + \
             "Usage: %prog [OPTIONS] url\n"
     description = """\
 Display ancestry for a given path in an SVN repository."""
