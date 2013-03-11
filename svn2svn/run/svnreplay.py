@@ -645,7 +645,8 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
         # Try to be efficient and keep track of an explicit list of paths in the
         # working copy that changed. If we commit from the root of the working copy,
         # then SVN needs to crawl the entire working copy looking for pending changes.
-        commit_paths.append(path_offset)
+        if action != 'D':
+            commit_paths.append(path_offset)
 
         # Special-handling for replace's
         if action == 'R':
