@@ -36,7 +36,7 @@ def parse_svn_commit_rev(output):
     """
     Parse the revision number from the output of "svn commit".
     """
-    output_lines = output.strip("\n").split("\n")
+    output_lines = output.strip(os.linesep).split(os.linesep)
     rev_num = None
     for line in output_lines:
         if line[0:19] == 'Committed revision ':
@@ -350,7 +350,7 @@ def full_svn_revert():
     run_svn(["revert", "--recursive", "."])
     output = run_svn(["status"])
     if output:
-        output_lines = output.strip("\n").split("\n")
+        output_lines = output.strip(os.linesep).split(os.linesep)
         for line in output_lines:
             if line[0] == "?":
                 path = line[4:].strip(" ")
