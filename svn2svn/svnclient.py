@@ -40,7 +40,7 @@ def safe_path(path, rev_number=None):
     """
     # URL-escape URL's, but leave local WC paths alone
     if "://" in path:
-        path = urllib.quote(path, ":/")
+        path = urllib.quote(path, ":/+")
     # Add peg revision
     if rev_number is not None:
         path += "@"+str(rev_number)
