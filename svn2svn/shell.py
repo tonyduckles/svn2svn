@@ -72,7 +72,7 @@ def rmtree(path):
     return shutil.rmtree(path, False, _rmtree_error_handler)
 
 
-# Make sure we do not get localized output from the Suversion
+# Make sure we do not get localized output from the Subversion
 # command line client.
 os.environ['LC_MESSAGES'] = 'C'
 
