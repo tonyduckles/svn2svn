@@ -72,6 +72,10 @@ def rmtree(path):
     return shutil.rmtree(path, False, _rmtree_error_handler)
 
 
+# Make sure we do not get localized output from the Suversion
+# command line client.
+os.environ['LC_MESSAGES'] = 'C'
+
 locale_encoding = locale.getpreferredencoding()
 
 def get_encoding():
