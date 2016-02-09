@@ -4,7 +4,7 @@ Replicate (replay) changesets from one Subversion repository to another.
 
 Features
 --------
-- **Meant for replaying history into an "empty target location**. This could be
+- **Meant for replaying history into an "empty" target location**. This could be
   an empty target repo or simply an empty folder/branch in the target repo.
 - **Maintains logical history (ancestry) when possible**, e.g. uses "svn copy"
   for renames.
