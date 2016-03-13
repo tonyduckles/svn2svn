@@ -876,8 +876,8 @@ def real_main(args):
         source_start_rev = int(source_start_log['revision'])
         ui.status("Starting at source revision %s.", source_start_rev, level=ui.VERBOSE)
         ui.status("", level=ui.VERBOSE)
-        if options.keep_revnum and source_rev > target_rev_last:
-            target_rev_last = keep_revnum(source_rev, target_rev_last, wc_target_tmp)
+        if options.keep_revnum and source_start_rev > target_rev_last:
+            target_rev_last = keep_revnum(source_start_rev, target_rev_last, wc_target_tmp)
 
         # For the initial commit to the target URL, export all the contents from
         # the source URL at the start-revision.
@@ -914,7 +914,7 @@ def real_main(args):
             commit_count += 1
             target_rev_last = target_rev
             if options.verify:
-                verify_commit(source_rev, target_rev_last)
+                verify_commit(source_start_rev, target_rev_last)
     else:
         # Re-build the rev_map based on any already-replayed history in target_url
         build_rev_map(target_url, target_rev_last, source_info)
