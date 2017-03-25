@@ -9,6 +9,8 @@ import calendar
 import operator
 import urllib
 
+PATHS_ENCODING = 'utf-8'
+
 try:
     from xml.etree import cElementTree as ET
 except ImportError:
@@ -38,6 +40,8 @@ def safe_path(path, rev_number=None):
     """
     Build a path to pass as a SVN command-line arg.
     """
+    if isinstance(path, unicode):
+        path = path.encode(PATHS_ENCODING)
     # URL-escape URL's, but leave local WC paths alone
     if "://" in path:
         path = urllib.quote(path, ":/+")
