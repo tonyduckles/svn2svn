@@ -354,9 +354,9 @@ def full_svn_revert():
         for line in output_lines:
             if line[0] == "?":
                 path = line[4:].strip(" ")
-                if os.path.isfile(path):
+                if os.path.islink(path) or os.path.isfile(path):
                     os.remove(path)
-                if os.path.isdir(path):
+                elif os.path.isdir(path):
                     shell.rmtree(path)
 
 def gen_tracking_revprops(source_rev):
