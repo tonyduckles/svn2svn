@@ -11,7 +11,7 @@ def in_svn(p, require_in_repo=False, prefix=""):
     With SVN 1.7 and beyond, WC-NG means only a single top-level ".svn" at the root of the working-copy.
     Use "svn status" to check the status of the file/folder.
     """
-    entries = svnclient.status(p, non_recursive=True)
+    entries = svnclient.status(p, non_recursive=True, resolve_symlink=False)
     if not entries:
         return False
     d = entries[0]
