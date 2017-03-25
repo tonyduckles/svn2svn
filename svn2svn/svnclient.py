@@ -245,12 +245,21 @@ def run_svn_log(svn_url_or_wc, rev_start, rev_end, limit, stop_on_copy=False, ge
     xml_string = run_svn(args)
     return _parse_svn_log_xml(xml_string)
 
-def status(svn_wc, quiet=False, non_recursive=False):
+def status(svn_wc, quiet=False, non_recursive=False, resolve_symlink=True):
     """
     Get SVN status information about the given working copy.
     """
     # Ensure proper stripping by canonicalizing the path
     svn_wc = os.path.abspath(svn_wc)
+    # By default 'svn status' resolves symbolic links
+    # Use parent dir for fetching real symbolic link status
+    if not resolve_symlink and os.path.islink(svn_wc):
+        dir_status = status(os.path.dirname(svn_wc))
+        link_name = os.path.basename(svn_wc)
+        link_status = [entry for entry in dir_status if entry['path'] == link_name]
+        assert len(link_status) == 1
+        link_status[0]['path'] = ''
+        return link_status
     args = ['status', '--xml', '--ignore-externals']
     if quiet:
         args += ['-q']
