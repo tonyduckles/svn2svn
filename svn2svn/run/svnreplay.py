@@ -659,10 +659,9 @@ def process_svn_log_entry(log_entry, ancestors, commit_paths, prefix = ""):
                 # child folder under that parent folder is a "replace" action on the final
                 # merge to trunk. Since the child folders will be in skip_paths, do_svn_add
                 # wouldn't have created them while processing the parent "add" path.
-                if path_is_dir:
-                    # Need to "svn update" before "svn remove" in case child contents are at
-                    # a higher rev than the (parent) path_offset.
-                    svnclient.update(path_offset)
+                # Need to "svn update" before "svn remove" in case child contents are at
+                # a higher rev than the (parent) path_offset.
+                svnclient.update(path_offset)
                 svnclient.remove(path_offset, force=True)
             action = 'A'
 
