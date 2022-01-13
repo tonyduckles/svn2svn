@@ -70,6 +70,8 @@ def commit_from_svn_log_entry(log_entry, commit_paths=None, target_revprops=None
         message += "\nDate: " + svn_date
     if options.log_author:
         message += "\nAuthor: " + log_entry['author']
+    if options.log_revision:
+        message += "\nOriginalRevision: " + str(log_entry['revision'])
     args += ["-m", message]
     revprops = {}
     if log_entry['revprops']:
@@ -1060,6 +1062,8 @@ Examples:
                       help="Append source commit author to replayed commit mesages.")
     parser.add_option("-d", "--log-date", action="store_true", dest="log_date", default=False,
                       help="Append source commit time to replayed commit messages.")
+    parser.add_option("-k", "--log-revision", action="store_true", dest="log_revision", default=False,
+                      help="Append source revision number to replayed commit messages.")
     parser.add_option("-l", "--limit", type="int", dest="entries_proc_limit", metavar="NUM",
                       help="Maximum number of source revisions to process.")
     parser.add_option("-n", "--dry-run", action="store_true", dest="dry_run", default=False,
