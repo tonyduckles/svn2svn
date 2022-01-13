@@ -119,6 +119,7 @@ See `svnreplay.py --help`:
       -u, --log-author      Append source commit author to replayed commit
                             mesages.
       -d, --log-date        Append source commit time to replayed commit messages.
+      -k, --log-revision    Append source revision number to replayed commit messages.
       -l, --limit=NUM       Maximum number of source revisions to process.
       -n, --dry-run         Process next source revision but don't commit changes
                             to target working-copy (forces --limit=1).
